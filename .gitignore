@@ -7,3 +7,4 @@ captures
 .log-classes
 *.iml
 github.properties
+app/local.properties

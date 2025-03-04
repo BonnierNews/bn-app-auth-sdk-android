@@ -120,7 +120,7 @@ publishing {
     repositories {
         maven {
             name = "GitHubPackages"
-            url = uri("https://maven.pkg.github.com/BonnierNews/bn-app-auth-android")
+            url = uri("https://maven.pkg.github.com/BonnierNews/bn-app-auth-sdk-android")
 
             credentials {
                 val githubProperties = Properties()
