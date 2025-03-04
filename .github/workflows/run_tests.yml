@@ -1,0 +1,28 @@
+#RUN_TESTS
+name: RUN_TESTS
+
+on:
+  pull_request:
+    branches: [ main, feature/** ]
+
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      GPR_USER: ${{ secrets.GPR_USER }}
+      GPR_API_KEY: ${{ secrets.GPR_API_KEY }}
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v1
+        with:
+          java-version: 17
+
+      - name: Run BnAppAuth Tests
+        run: ./gradlew BNAppAuth_Android:clean build
