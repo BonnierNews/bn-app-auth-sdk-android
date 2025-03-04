@@ -90,8 +90,8 @@ publishing {
     publications {
         register<MavenPublication>("release") {
             groupId = "com.github.BonnierNews"
-            artifactId = "bn-app-auth-aar"
-            version = System.getenv("RELEASE_VERSION") ?: "1.0.4"
+            artifactId = "bn-app-auth-sdk-aar"
+            version = System.getenv("RELEASE_VERSION") ?: "1.0.0"
             artifact("$buildDir/outputs/aar/BNAppAuth_Android-release.aar")
 
             pom {
