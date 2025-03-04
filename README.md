@@ -16,7 +16,7 @@ Make sure to include the necessary dependencies in your `build.gradle` file:
 
 ```
 dependencies {
-    compile 'com.github.BonnierNews:bn-app-auth-aar:{latest version}'
+    compile 'com.github.BonnierNews:bn-app-auth-sdk-aar:{latest version}'
 }
 ```
 
