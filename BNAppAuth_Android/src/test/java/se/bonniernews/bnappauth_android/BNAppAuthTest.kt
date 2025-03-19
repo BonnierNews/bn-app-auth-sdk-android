@@ -222,7 +222,6 @@ class BNAppAuthTest {
         val builder = appAuth.authorizationRequest(authorizationServiceConfiguration, null, "create-user", locale)
 
         // Then
-        println(builder.additionalParameters)
         assertEquals(builder.additionalParameters["locale"], locale)
     }
 
