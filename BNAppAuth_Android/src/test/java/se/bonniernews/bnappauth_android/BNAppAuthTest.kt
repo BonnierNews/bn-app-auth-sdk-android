@@ -139,6 +139,31 @@ class BNAppAuthTest {
     }
 
     @Test
+    fun `local from login is passed to authorizationRequest`() {
+        // Given
+        val locale = "sv-SE"
+        val appAuth = spy(bnAppAuth)
+        val intent = fakeIntent(config.loginRedirectURL.toString())
+        whenever(authService.getAuthorizationRequestIntent(any())).thenReturn(intent)
+        whenever(authServiceSdk.fetchFromIssuer(any(), any())).thenAnswer { args ->
+            args.getArgument<(AuthorizationServiceConfiguration?, Exception?) -> Unit>(1)
+                .invoke(authorizationServiceConfiguration, null)
+        }
+
+        // When
+        var loginIntentTest: Intent? = null
+        appAuth.login(null, locale = locale) { loginIntent, _ ->
+            loginIntentTest = loginIntent
+        }
+
+        // Then
+        assertEquals(loginIntentTest, intent)
+        verify(appAuth).writeAuthState(any())
+        verify(appAuth).authorizationRequest(authorizationServiceConfiguration, null, null, locale)
+        verify(authService).getAuthorizationRequestIntent(any())
+    }
+
+    @Test
     fun `successful createAccount returns intent`() {
         // Given
         val appAuth = spy(bnAppAuth)
@@ -160,6 +185,45 @@ class BNAppAuthTest {
         verify(appAuth).writeAuthState(any())
         verify(appAuth).authorizationRequest(authorizationServiceConfiguration, null, "create-user")
         verify(authService).getAuthorizationRequestIntent(any())
+    }
+
+    @Test
+    fun `locale is passed to authorizationRequest`() {
+        // Given
+        val locale = "sv-SE"
+        val appAuth = spy(bnAppAuth)
+        val intent = fakeIntent(config.loginRedirectURL.toString())
+        whenever(authService.getAuthorizationRequestIntent(any())).thenReturn(intent)
+        whenever(authServiceSdk.fetchFromIssuer(any(), any())).thenAnswer { args ->
+            args.getArgument<(AuthorizationServiceConfiguration?, Exception?) -> Unit>(1)
+                .invoke(authorizationServiceConfiguration, null)
+        }
+
+        // When
+        var loginIntentTest: Intent? = null
+        appAuth.createAccount(locale = locale) { loginIntent, _ ->
+            loginIntentTest = loginIntent
+        }
+
+        // Then
+        assertEquals(loginIntentTest, intent)
+        verify(appAuth).writeAuthState(any())
+        verify(appAuth).authorizationRequest(authorizationServiceConfiguration, null, "create-user", locale)
+        verify(authService).getAuthorizationRequestIntent(any())
+    }
+
+    @Test
+    fun `authorizationRequest is adding locale as additionalParameter`() {
+        // Given
+        val locale = "sv-SE"
+        val appAuth = spy(bnAppAuth)
+
+        // When
+        val builder = appAuth.authorizationRequest(authorizationServiceConfiguration, null, "create-user", locale)
+
+        // Then
+        println(builder.additionalParameters)
+        assertEquals(builder.additionalParameters["locale"], locale)
     }
 
     @Test

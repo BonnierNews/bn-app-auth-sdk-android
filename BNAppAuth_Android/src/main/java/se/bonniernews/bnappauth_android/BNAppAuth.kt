@@ -21,11 +21,16 @@ interface BNAppAuth {
     fun login(
         loginToken: String? = null,
         action: String? = null,
+        locale: String? = null,
         callback: (intent: Intent?, exception: BnAppAuthException?) -> Unit
     )
 
     fun logout(): Intent?
-    fun createAccount(callback: (intent: Intent?, exception: BnAppAuthException?) -> Unit)
+    fun createAccount(
+        locale: String? = null,
+        callback: (intent: Intent?, exception: BnAppAuthException?) -> Unit
+    )
+
     fun getIdToken(
         forceRefresh: Boolean = false,
         callback: (tokenResponse: TokenResponse?, exception: BnAppAuthException?) -> Unit
@@ -95,6 +100,7 @@ class BNAppAuthImpl : BNAppAuth {
     override fun login(
         loginToken: String?,
         action: String?,
+        locale: String?,
         callback: (intent: Intent?, exception: BnAppAuthException?) -> Unit
     ) {
         if (!::config.isInitialized) {
@@ -113,7 +119,8 @@ class BNAppAuthImpl : BNAppAuth {
                 callback(null, BnAppAuthException.convert(OTHER))
                 return@fetchFromIssuer
             }
-            val authorizationRequest = authorizationRequest(configuration, loginToken, action)
+            val authorizationRequest =
+                authorizationRequest(configuration, loginToken, action, locale)
             val requestIntent = try {
                 authService?.getAuthorizationRequestIntent(authorizationRequest)
             } catch (e: Exception) {
@@ -131,8 +138,11 @@ class BNAppAuthImpl : BNAppAuth {
         }
     }
 
-    override fun createAccount(callback: (intent: Intent?, exception: BnAppAuthException?) -> Unit) {
-        login(action = "create-user") { intent, ex ->
+    override fun createAccount(
+        locale: String?,
+        callback: (intent: Intent?, exception: BnAppAuthException?) -> Unit
+    ) {
+        login(action = "create-user", locale = locale) { intent, ex ->
             ex?.let {
                 Logger.error("createAccount=$it", config.debuggable)
                 callback(null, it)
@@ -252,7 +262,8 @@ class BNAppAuthImpl : BNAppAuth {
     fun authorizationRequest(
         serviceConfig: AuthorizationServiceConfiguration,
         loginToken: String? = null,
-        action: String? = null
+        action: String? = null,
+        locale: String? = null,
     ): AuthorizationRequest {
         val builder = AuthorizationRequest.Builder(
             serviceConfig,
@@ -263,12 +274,14 @@ class BNAppAuthImpl : BNAppAuth {
             .setPrompt(config.prompt)
             .setScopes("${Scope.OPENID} ${Scope.PROFILE} ${Scope.OFFLINE_ACCESS}")
 
-        loginToken?.let {
-            builder.setAdditionalParameters(mapOf("token" to it))
+        val additionalParams = mutableMapOf<String, String?>().apply {
+            loginToken?.let { put("token", it) }
+            action?.let { put("action", it) }
+            locale?.let { put("locale", it) }
         }
-        action?.let {
-            builder.setAdditionalParameters(mapOf("action" to it))
-        }
+
+        builder.setAdditionalParameters(additionalParams)
+
         return builder.build()
     }
 
@@ -276,7 +289,7 @@ class BNAppAuthImpl : BNAppAuth {
         val stateJson = authPrefs?.getString(SHARED_PREFS_KEY, null) ?: return null
         val state = try {
             AuthState.jsonDeserialize(stateJson)
-        } catch(_: java.lang.Exception) {
+        } catch (_: java.lang.Exception) {
             return null
         }
         currentIdToken = state.idToken
