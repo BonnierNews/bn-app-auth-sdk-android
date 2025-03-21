@@ -273,11 +273,13 @@ class BNAppAuthImpl : BNAppAuth {
         )
             .setPrompt(config.prompt)
             .setScopes("${Scope.OPENID} ${Scope.PROFILE} ${Scope.OFFLINE_ACCESS}")
+            .apply {
+                locale?.let { setUiLocales(it) }
+            }
 
         val additionalParams = mutableMapOf<String, String?>().apply {
             loginToken?.let { put("token", it) }
             action?.let { put("action", it) }
-            locale?.let { put("locale", it) }
         }
 
         builder.setAdditionalParameters(additionalParams)
