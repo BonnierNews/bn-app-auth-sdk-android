@@ -30,15 +30,17 @@ android {
             )
         }
     }
+
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = JavaVersion.VERSION_21.toString()
     }
 
     tasks.withType<Test>().configureEach {
+        jvmArgs("-XX:+EnableDynamicAgentLoading")
         testLogging {
             events = setOf(
                 TestLogEvent.PASSED,
@@ -78,12 +80,12 @@ android {
 dependencies {
     implementation("net.openid:appauth:0.11.1")
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.mockito:mockito-core:4.7.0")
-    testImplementation("org.mockito:mockito-inline:4.7.0")
-    testImplementation("org.mockito.kotlin:mockito-kotlin:4.0.0")
-    testImplementation("org.robolectric:robolectric:4.10.3")
-    androidTestImplementation("androidx.test.ext:junit:1.1.5")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+    testImplementation("org.mockito:mockito-core:5.12.0")
+    testImplementation("org.mockito:mockito-inline:5.2.0")
+    testImplementation("org.mockito.kotlin:mockito-kotlin:5.3.1")
+    testImplementation("org.robolectric:robolectric:4.11.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 }
 
 publishing {

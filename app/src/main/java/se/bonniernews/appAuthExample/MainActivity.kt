@@ -151,13 +151,17 @@ class MainActivity : ComponentActivity() {
                 //TODO: Handle error
                 return@authLogin
             }
-            loginActivityIntent.launch(intent)
+            intent?.let {
+                loginActivityIntent.launch(it)
+            }
         }
     }
 
     private fun logout() {
         val intent = appAuth.logout()
-        logoutActivityIntent.launch(intent)
+        intent?.let {
+            logoutActivityIntent.launch(intent)
+        }
     }
 
     private var loginActivityIntent: ActivityResultLauncher<Intent> =
