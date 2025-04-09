@@ -136,3 +136,7 @@ publishing {
         }
     }
 }
+
+tasks.named("publishReleasePublicationToMavenLocal") {
+    dependsOn(":bundleReleaseAar")
+}
