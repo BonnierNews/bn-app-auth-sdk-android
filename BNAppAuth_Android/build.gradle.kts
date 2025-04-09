@@ -130,8 +130,8 @@ publishing {
                 if (propsFile.canRead()) {
                     githubProperties.load(FileInputStream(propsFile))
                 }
-                username = (githubProperties["gpr.usr"] ?: System.getenv("GPR_USER")).toString()
-                password = (githubProperties["gpr.key"] ?: System.getenv("GPR_API_KEY")).toString()
+                username = (githubProperties["gpr.usr"] ?: (System.getenv("GPR_USER") ?: "")).toString()
+                password = (githubProperties["gpr.key"] ?: (System.getenv("GPR_API_KEY") ?: "")).toString()
             }
         }
     }
