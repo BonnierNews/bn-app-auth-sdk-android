@@ -1,6 +1,0 @@
-jdk:
-  - openjdk17
-install:
-  - echo "run gradle"
-  - ./gradlew build :BNAppAuth_Android:publishToMavenLocal
-
