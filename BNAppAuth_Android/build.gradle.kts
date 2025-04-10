@@ -35,6 +35,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
     }
+
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_21.toString()
     }
@@ -130,9 +131,13 @@ publishing {
                 if (propsFile.canRead()) {
                     githubProperties.load(FileInputStream(propsFile))
                 }
-                username = (githubProperties["gpr.usr"] ?: System.getenv("GPR_USER")).toString()
-                password = (githubProperties["gpr.key"] ?: System.getenv("GPR_API_KEY")).toString()
+                username = (githubProperties["gpr.usr"] ?: (System.getenv("GPR_USER") ?: "")).toString()
+                password = (githubProperties["gpr.key"] ?: (System.getenv("GPR_API_KEY") ?: "")).toString()
             }
         }
     }
+}
+
+tasks.named("publishReleasePublicationToMavenLocal") {
+    dependsOn("bundleReleaseAar")
 }

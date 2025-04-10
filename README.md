@@ -15,8 +15,13 @@ BNAppAuth is an Android library for handling authentication using the AppAuth li
 Make sure to include the necessary dependencies in your `build.gradle` file:
 
 ```
+repositories {
+    mavenCentral()
+    maven { url = uri("https://jitpack.io") }
+}
+
 dependencies {
-    compile 'com.github.BonnierNews:bn-app-auth-sdk-aar:{latest version}'
+    implementation("com.github.BonnierNews:bn-app-auth-sdk-android:Tag")
 }
 ```
 
