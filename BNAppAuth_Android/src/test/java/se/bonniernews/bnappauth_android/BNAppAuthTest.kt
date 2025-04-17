@@ -489,7 +489,7 @@ class BNAppAuthTest {
             loginRedirectURL = Uri.parse("test://login_url"),
             logoutRedirectUrl = Uri.parse("test://logout_url"),
             debuggable = true,
-            customScopes = listOf("customScope1", "customScope2")
+            customScopes = listOf("profile", "offline_access", "customScope1", "customScope2")
         )
         configure(config)
         val locale = "sv-SE"

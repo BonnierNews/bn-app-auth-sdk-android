@@ -274,7 +274,7 @@ class BNAppAuthImpl : BNAppAuth {
         )
             .setPrompt(config.prompt)
             .setScopes(buildString {
-                append("${Scope.OPENID} ${Scope.PROFILE} ${Scope.OFFLINE_ACCESS}")
+                append(Scope.OPENID)
                 config.customScopes?.let { scopes ->
                     append(" ${scopes.joinToString(" ")}")
                 }
