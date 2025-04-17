@@ -55,6 +55,7 @@ interface BNAppAuth {
         val loginRedirectURL: Uri,
         val logoutRedirectUrl: Uri,
         val prompt: String = "$SELECT_ACCOUNT $CONSENT",
+        val customScopes: List<String>? = null,
         val debuggable: Boolean = false,
     )
 
@@ -272,7 +273,12 @@ class BNAppAuthImpl : BNAppAuth {
             config.loginRedirectURL,
         )
             .setPrompt(config.prompt)
-            .setScopes("${Scope.OPENID} ${Scope.PROFILE} ${Scope.OFFLINE_ACCESS}")
+            .setScopes(buildString {
+                append("${Scope.OPENID} ${Scope.PROFILE} ${Scope.OFFLINE_ACCESS}")
+                config.customScopes?.let { scopes ->
+                    append(" ${scopes.joinToString(" ")}")
+                }
+            })
             .apply {
                 locale?.let { setUiLocales(it) }
             }
