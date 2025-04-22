@@ -78,8 +78,8 @@ class BNAppAuthTest {
 
     private val bnAppAuthException = BnAppAuthException.convert(authException)
 
-    private fun configure() {
-        bnAppAuth.config = config
+    private fun configure(configuration: BNAppAuth.ClientConfiguration = config) {
+        bnAppAuth.config = configuration
         bnAppAuth.authPrefs = authPrefs
         bnAppAuth.authService = authService
         bnAppAuth.authServiceSdk = authServiceSdk
@@ -477,5 +477,28 @@ class BNAppAuthTest {
         // Then
         assert(exceptionTest?.rootCause is ActivityNotFoundException)
         verify(appAuth, never()).writeAuthState(any())
+    }
+
+    @Test
+    fun `assert that customScopes is used when set`() {
+        // Given
+        val config = BNAppAuth.ClientConfiguration(
+            issuer = Uri.parse("https://test.se/oidc/"),
+            clientId = "app",
+            clientSecret = null,
+            loginRedirectURL = Uri.parse("test://login_url"),
+            logoutRedirectUrl = Uri.parse("test://logout_url"),
+            debuggable = true,
+            customScopes = listOf("profile", "offline_access", "customScope1", "customScope2")
+        )
+        configure(config)
+        val locale = "sv-SE"
+        val appAuth = spy(bnAppAuth)
+
+        // When
+        val builder = appAuth.authorizationRequest(authorizationServiceConfiguration, null, "create-user", locale)
+
+        // Then
+        assertEquals(builder.scope, "openid profile offline_access customScope1 customScope2")
     }
 }
