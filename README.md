@@ -34,6 +34,7 @@ val clientConfig = BNAppAuth.ClientConfiguration(
     clientSecret = "your-client-secret", // Optional
     loginRedirectURL = Uri.parse("your-login-redirect-url"),
     logoutRedirectUrl = Uri.parse("your-logout-redirect-url"),
+    customScopes = listOf("custom-scope"), // Optional
     debuggable = true // Enable for debugging
 )
 
