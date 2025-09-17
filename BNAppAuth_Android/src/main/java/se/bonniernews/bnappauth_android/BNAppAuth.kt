@@ -13,6 +13,8 @@ import net.openid.appauth.AuthorizationException.AuthorizationRequestErrors.OTHE
 import net.openid.appauth.AuthorizationRequest.Prompt.CONSENT
 import net.openid.appauth.AuthorizationRequest.Prompt.SELECT_ACCOUNT
 import net.openid.appauth.AuthorizationRequest.Scope
+import org.json.JSONException
+import org.json.JSONObject
 
 interface BNAppAuth {
     val isAuthorized: Boolean
@@ -61,6 +63,7 @@ interface BNAppAuth {
 
     data class TokenResponse(
         val idToken: String?,
+        val bnIdToken: String? = null,
         val isUpdated: Boolean = false,
     )
 }
@@ -199,12 +202,23 @@ class BNAppAuthImpl : BNAppAuth {
                     return@AuthStateAction
                 }
 
+                val lastTokenResponse = authState?.lastTokenResponse
+                val bnIdToken: String? = lastTokenResponse?.let { resp ->
+                    try {
+                        JSONObject(resp.jsonSerializeString()).optString("bnIdToken", null)
+                    } catch (e: JSONException) {
+                        Logger.error("Failed to parse bnIdToken from token response: $e", config.debuggable)
+                        null
+                    }
+                }
+
                 val isUpdated = token != currentIdToken
                 writeAuthState(authState)
                 Logger.debug("idToken=$token", config.debuggable)
                 Logger.debug("accessToken=${authState?.accessToken}", config.debuggable)
                 Logger.debug("refreshToken=${authState?.refreshToken}", config.debuggable)
-                callback(BNAppAuth.TokenResponse(token, isUpdated), null)
+                Logger.debug("bnIdToken=$bnIdToken", config.debuggable)
+                callback(BNAppAuth.TokenResponse(token, bnIdToken, isUpdated), null)
             }
         )
     }
