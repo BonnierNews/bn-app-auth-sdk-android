@@ -202,15 +202,17 @@ class BNAppAuthImpl : BNAppAuth {
                     return@AuthStateAction
                 }
 
-                val lastTokenResponse = authState?.lastTokenResponse
-                val bnIdToken: String? = lastTokenResponse?.let { resp ->
-                    try {
-                        JSONObject(resp.jsonSerializeString()).optString("bnIdToken", null)
-                    } catch (e: JSONException) {
-                        Logger.error("Failed to parse bnIdToken from token response: $e", config.debuggable)
-                        null
+                val bnIdToken: String? = if (config.customScopes?.contains("old_bnidtoken") == true) {
+                    authState?.lastTokenResponse?.let { resp ->
+                        try {
+                            (JSONObject(resp.jsonSerializeString()).optJSONObject("additionalParameters"))
+                                ?.optString("old_bnidtoken", null)
+                        } catch (e: JSONException) {
+                            Logger.error("Failed to parse bnIdToken from token response: $e", config.debuggable)
+                            null
+                        }
                     }
-                }
+                } else null
 
                 val isUpdated = token != currentIdToken
                 writeAuthState(authState)
