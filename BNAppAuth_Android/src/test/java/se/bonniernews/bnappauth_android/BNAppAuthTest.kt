@@ -19,6 +19,7 @@ import org.junit.runner.RunWith
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
+import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.spy
@@ -127,7 +128,9 @@ class BNAppAuthTest {
         val intent = fakeIntent(config.loginRedirectURL.toString())
         whenever(authService.getAuthorizationRequestIntent(any())).thenReturn(intent)
         whenever(authServiceSdk.fetchFromIssuer(any(), any())).thenAnswer { args ->
-            args.getArgument<(AuthorizationServiceConfiguration?, AuthorizationException?) -> Unit>(1)
+            args.getArgument<(AuthorizationServiceConfiguration?, AuthorizationException?) -> Unit>(
+                1
+            )
                 .invoke(null, authException)
         }
 
@@ -208,7 +211,12 @@ class BNAppAuthTest {
         // Then
         assertEquals(loginIntentTest, intent)
         verify(appAuth).writeAuthState(any())
-        verify(appAuth).authorizationRequest(authorizationServiceConfiguration, null, "create-user", locale)
+        verify(appAuth).authorizationRequest(
+            authorizationServiceConfiguration,
+            null,
+            "create-user",
+            locale
+        )
         verify(authService).getAuthorizationRequestIntent(any())
     }
 
@@ -219,7 +227,12 @@ class BNAppAuthTest {
         val appAuth = spy(bnAppAuth)
 
         // When
-        val builder = appAuth.authorizationRequest(authorizationServiceConfiguration, null, "create-user", locale)
+        val builder = appAuth.authorizationRequest(
+            authorizationServiceConfiguration,
+            null,
+            "create-user",
+            locale
+        )
 
         // Then
         assertEquals(builder.uiLocales, locale)
@@ -496,9 +509,114 @@ class BNAppAuthTest {
         val appAuth = spy(bnAppAuth)
 
         // When
-        val builder = appAuth.authorizationRequest(authorizationServiceConfiguration, null, "create-user", locale)
+        val builder = appAuth.authorizationRequest(
+            authorizationServiceConfiguration,
+            null,
+            "create-user",
+            locale
+        )
 
         // Then
         assertEquals(builder.scope, "openid profile offline_access customScope1 customScope2")
+    }
+
+    @Test
+    fun `getIdToken sets old_bnidtoken if customScopes has old_bnidtoken`() {
+        // Given
+        val config = BNAppAuth.ClientConfiguration(
+            issuer = Uri.parse("https://test.se/oidc/"),
+            clientId = "app",
+            clientSecret = null,
+            loginRedirectURL = Uri.parse("test://login_url"),
+            logoutRedirectUrl = Uri.parse("test://logout_url"),
+            debuggable = true,
+            customScopes = listOf("old_bnidtoken")
+        )
+        configure(config)
+        val appAuth = spy(bnAppAuth)
+        appAuth.authState = authState
+
+        whenever(authState.isAuthorized).thenReturn(true)
+        whenever(appAuth.getAdditionalParameters(anyOrNull())).thenReturn(mapOf("old_bnidtoken" to "old_bnidtoken"))
+
+        whenever(authState.performActionWithFreshTokens(any(), any())).thenAnswer { args ->
+            (args.arguments[1] as? AuthStateAction)?.execute(
+                "accessToken",
+                "idToken",
+                null
+            )
+        }
+
+        // When
+        var resultTokenResponse: BNAppAuth.TokenResponse? = null
+        appAuth.getIdToken { response, _ ->
+            resultTokenResponse = response
+        }
+
+        // Then
+        assertEquals("old_bnidtoken", resultTokenResponse?.bnIdToken)
+    }
+
+    @Test
+    fun `getIdToken performs manual refresh when getLoginToken is requested`() {
+        // Given
+        val appAuth = spy(bnAppAuth)
+        appAuth.authState = authState
+
+        whenever(authState.isAuthorized).thenReturn(true)
+        whenever(authState.authorizationServiceConfiguration).thenReturn(
+            authorizationServiceConfiguration
+        )
+        whenever(authState.refreshToken).thenReturn("fake_refresh_token")
+
+        whenever(appAuth.getAdditionalParameters(anyOrNull())).thenReturn(mapOf("getLoginToken" to "secret_login_token"))
+
+        whenever(authService.performTokenRequest(any(), any())).thenAnswer { args ->
+            val callback = args.getArgument<AuthorizationService.TokenResponseCallback>(1)
+            val successfulResponse = TokenResponse.Builder(tokenRequest)
+                .setIdToken("new_id_token")
+                .build()
+
+            callback.onTokenRequestCompleted(successfulResponse, null)
+        }
+
+        // When
+        var resultTokenResponse: BNAppAuth.TokenResponse? = null
+        appAuth.getIdToken(getLoginToken = true) { response, _ ->
+            resultTokenResponse = response
+        }
+
+        // Then
+        verify(authService).performTokenRequest(any(), any())
+        assertEquals("new_id_token", resultTokenResponse?.idToken)
+        assertEquals("secret_login_token", resultTokenResponse?.loginToken)
+    }
+
+    @Test
+    fun `getIdToken returns exception when manual scope refresh fails`() {
+        // Given
+        val appAuth = spy(bnAppAuth)
+        appAuth.authState = authState
+        whenever(authState.isAuthorized).thenReturn(true)
+        whenever(authState.authorizationServiceConfiguration).thenReturn(authorizationServiceConfiguration)
+        whenever(authState.refreshToken).thenReturn("fake_refresh_token")
+
+        // Mock the network failure
+        whenever(authService.performTokenRequest(any(), any())).thenAnswer { args ->
+            val callback = args.getArgument<AuthorizationService.TokenResponseCallback>(1)
+            callback.onTokenRequestCompleted(null, authException)
+        }
+
+        // When
+        var exceptionTest: BnAppAuthException? = null
+        appAuth.getIdToken(getLoginToken = true) { _, exception ->
+            exceptionTest = exception
+        }
+
+        // Then
+        assertNotNull(exceptionTest)
+        assertEquals(bnAppAuthException.code, exceptionTest?.code)
+        val tokenResponse: TokenResponse? = null
+        verify(authState).update(tokenResponse, authException)
     }
 }

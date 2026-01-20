@@ -20,7 +20,7 @@ android {
             useSupportLibrary = true
         }
 
-        manifestPlaceholders["appAuthRedirectScheme"] = "custom.redirect.scheme"
+        manifestPlaceholders["appAuthRedirectScheme"] = "se.expressen.launcher.auth"
     }
 
     buildTypes {

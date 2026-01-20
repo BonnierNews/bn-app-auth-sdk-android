@@ -35,6 +35,7 @@ interface BNAppAuth {
 
     fun getIdToken(
         forceRefresh: Boolean = false,
+        getLoginToken: Boolean = false,
         callback: (tokenResponse: TokenResponse?, exception: BnAppAuthException?) -> Unit
     )
 
@@ -64,6 +65,7 @@ interface BNAppAuth {
     data class TokenResponse(
         val idToken: String?,
         val bnIdToken: String? = null,
+        val loginToken: String? = null, // Add this
         val isUpdated: Boolean = false,
     )
 }
@@ -176,6 +178,7 @@ class BNAppAuthImpl : BNAppAuth {
 
     override fun getIdToken(
         forceRefresh: Boolean,
+        getLoginToken: Boolean,
         callback: (tokenResponse: BNAppAuth.TokenResponse?, exception: BnAppAuthException?) -> Unit
     ) {
         if (!::config.isInitialized) {
@@ -193,37 +196,74 @@ class BNAppAuthImpl : BNAppAuth {
             return
         }
 
-        authState?.needsTokenRefresh = forceRefresh
-        authState?.performActionWithFreshTokens(service,
-            AuthState.AuthStateAction { _, token, ex ->
-                ex?.let {
-                    Logger.error("performActionWithFreshTokens=$it", config.debuggable)
-                    callback(null, BnAppAuthException.convert(it))
-                    return@AuthStateAction
+        val currentScopesString = authState?.lastTokenResponse?.scope ?: ""
+        val currentScopesSet = currentScopesString.split(" ").filter { it.isNotEmpty() }.toSet()
+        val needsNewScope = getLoginToken && !currentScopesSet.contains("getLoginToken")
+        val configuration = authState?.authorizationServiceConfiguration
+
+        if (needsNewScope && configuration != null) {
+            val request = TokenRequest.Builder(
+                configuration,
+                config.clientId
+            )
+                .setGrantType(GrantTypeValues.REFRESH_TOKEN)
+                .setRefreshToken(authState?.refreshToken)
+                .setScope(currentScopesSet.plus("getLoginToken").joinToString(" "))
+                .setAdditionalParameters(mapOf("prompt" to config.prompt))
+                .build()
+
+            service.performTokenRequest(request) { response, ex ->
+                authState?.update(response, ex)
+                if (ex != null) {
+                    Logger.error("Manual scope refresh failed=$ex", config.debuggable)
+                    callback(null, BnAppAuthException.convert(ex))
+                } else {
+                    handleAndCallback(response?.idToken, callback)
                 }
-
-                val bnIdToken: String? = if (config.customScopes?.contains("old_bnidtoken") == true) {
-                    authState?.lastTokenResponse?.let { resp ->
-                        try {
-                            (JSONObject(resp.jsonSerializeString()).optJSONObject("additionalParameters"))
-                                ?.optString("old_bnidtoken", null)
-                        } catch (e: JSONException) {
-                            Logger.error("Failed to parse bnIdToken from token response: $e", config.debuggable)
-                            null
-                        }
-                    }
-                } else null
-
-                val isUpdated = token != currentIdToken
-                writeAuthState(authState)
-                Logger.debug("idToken=$token", config.debuggable)
-                Logger.debug("accessToken=${authState?.accessToken}", config.debuggable)
-                Logger.debug("refreshToken=${authState?.refreshToken}", config.debuggable)
-                Logger.debug("bnIdToken=$bnIdToken", config.debuggable)
-                callback(BNAppAuth.TokenResponse(token, bnIdToken, isUpdated), null)
             }
-        )
+        } else {
+            authState?.needsTokenRefresh = forceRefresh
+            authState?.performActionWithFreshTokens(service) { _, token, ex ->
+                if (ex != null) {
+                    Logger.error("performActionWithFreshTokens=$ex", config.debuggable)
+                    callback(null, BnAppAuthException.convert(ex))
+                } else {
+                    handleAndCallback(token, callback)
+                }
+            }
+        }
     }
+
+    /**
+     * Helper to handle the common logic of state writing and parsing additional params
+     */
+    private fun handleAndCallback(
+        token: String?,
+        callback: (tokenResponse: BNAppAuth.TokenResponse?, exception: BnAppAuthException?) -> Unit
+    ) {
+        var bnIdToken: String? = null
+        var bnLoginToken: String? = null
+
+        val params = getAdditionalParameters(authState?.lastTokenResponse)
+        if (params != null) {
+            if (config.customScopes?.contains("old_bnidtoken") == true) {
+                bnIdToken = params["old_bnidtoken"]
+            }
+            bnLoginToken = params["getLoginToken"]
+        }
+
+        val isUpdated = token != currentIdToken
+        writeAuthState(authState)
+
+        Logger.debug("idToken=$token", config.debuggable)
+        Logger.debug("bnIdToken=$bnIdToken", config.debuggable)
+        Logger.debug("bnLoginToken=$bnLoginToken", config.debuggable)
+
+        callback(BNAppAuth.TokenResponse(token, bnIdToken, bnLoginToken, isUpdated), null)
+    }
+
+    @VisibleForTesting
+    internal fun getAdditionalParameters(resp: TokenResponse?) = resp?.additionalParameters
 
     @VisibleForTesting
     fun performTokenRequest(
