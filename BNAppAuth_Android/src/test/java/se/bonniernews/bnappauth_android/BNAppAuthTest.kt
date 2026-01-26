@@ -19,6 +19,7 @@ import org.junit.runner.RunWith
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
+import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.spy
@@ -350,8 +351,8 @@ class BNAppAuthTest {
         appAuth.currentIdToken = "idToken"
         whenever(authState.isAuthorized).thenReturn(true)
         whenever(authState.idToken).thenReturn("idToken")
-        whenever(authState.performActionWithFreshTokens(any(), any())).thenAnswer { args ->
-            (args.arguments[1] as? AuthStateAction)?.execute(
+        whenever(authState.performActionWithFreshTokens(any(), any<Map<String, String>>(), any())).thenAnswer { args ->
+            (args.arguments[2] as? AuthStateAction)?.execute(
                 "accessToken",
                 "idToken",
                 null
@@ -380,8 +381,8 @@ class BNAppAuthTest {
         appAuth.authState = authState
         whenever(authState.isAuthorized).thenReturn(true)
 
-        whenever(authState.performActionWithFreshTokens(any(), any())).thenAnswer { args ->
-            (args.arguments[1] as? AuthStateAction)?.execute(null, null, authException)
+        whenever(authState.performActionWithFreshTokens(any(), any<Map<String, String>>(), any())).thenAnswer { args ->
+            (args.arguments[2] as? AuthStateAction)?.execute(null, null, authException)
         }
 
         // When
@@ -405,8 +406,8 @@ class BNAppAuthTest {
         appAuth.currentIdToken = "idTokenOld"
         whenever(authState.isAuthorized).thenReturn(true)
         whenever(authState.createTokenRefreshRequest()).thenReturn(tokenRequest)
-        whenever(authState.performActionWithFreshTokens(any(), any())).thenAnswer { args ->
-            (args.arguments[1] as? AuthStateAction)?.execute(
+        whenever(authState.performActionWithFreshTokens(any(), any<Map<String, String>>(), any())).thenAnswer { args ->
+            (args.arguments[2] as? AuthStateAction)?.execute(
                 "idTokenNew",
                 "idToken",
                 null
@@ -500,5 +501,78 @@ class BNAppAuthTest {
 
         // Then
         assertEquals(builder.scope, "openid profile offline_access customScope1 customScope2")
+    }
+
+    @Test
+    fun `getIdToken sets old_bnidtoken if customScopes has old_bnidtoken`() {
+        // Given
+        val config = BNAppAuth.ClientConfiguration(
+            issuer = Uri.parse("https://test.se/oidc/"),
+            clientId = "app",
+            clientSecret = null,
+            loginRedirectURL = Uri.parse("test://login_url"),
+            logoutRedirectUrl = Uri.parse("test://logout_url"),
+            debuggable = true,
+            customScopes = listOf("old_bnidtoken")
+        )
+        configure(config)
+        val appAuth = spy(bnAppAuth)
+        appAuth.authState = authState
+
+        whenever(authState.isAuthorized).thenReturn(true)
+        whenever(appAuth.getAdditionalParameters(anyOrNull())).thenReturn(mapOf("old_bnidtoken" to "old_bnidtoken"))
+
+        whenever(authState.performActionWithFreshTokens(any(), any<Map<String, String>>(), any())).thenAnswer { args ->
+            (args.arguments[2] as? AuthStateAction)?.execute(
+                "accessToken",
+                "idToken",
+                null
+            )
+        }
+
+        // When
+        var resultTokenResponse: BNAppAuth.TokenResponse? = null
+        appAuth.getIdToken { response, _ ->
+            resultTokenResponse = response
+        }
+
+        // Then
+        assertEquals("old_bnidtoken", resultTokenResponse?.bnIdToken)
+    }
+
+    @Test
+    fun `getIdToken with getLoginToken=true sets login_token from response`() {
+        // Given
+        val config = BNAppAuth.ClientConfiguration(
+            issuer = Uri.parse("https://test.se/oidc/"),
+            clientId = "app",
+            clientSecret = null,
+            loginRedirectURL = Uri.parse("test://login_url"),
+            logoutRedirectUrl = Uri.parse("test://logout_url"),
+            debuggable = true,
+        )
+        configure(config)
+        val appAuth = spy(bnAppAuth)
+        appAuth.authState = authState
+
+        whenever(authState.isAuthorized).thenReturn(true)
+        whenever(appAuth.getAdditionalParameters(anyOrNull())).thenReturn(mapOf("login_token" to "login_token"))
+
+        whenever(authState.performActionWithFreshTokens(any(), any<Map<String, String>>(), any())).thenAnswer { args ->
+            (args.arguments[2] as? AuthStateAction)?.execute(
+                "accessToken",
+                "idToken",
+                null
+            )
+        }
+
+        // When
+        var resultTokenResponse: BNAppAuth.TokenResponse? = null
+        appAuth.getIdToken(getLoginToken = true) { response, _ ->
+            resultTokenResponse = response
+        }
+
+        // Then
+        assertEquals("login_token", resultTokenResponse?.loginToken)
     }
 }
