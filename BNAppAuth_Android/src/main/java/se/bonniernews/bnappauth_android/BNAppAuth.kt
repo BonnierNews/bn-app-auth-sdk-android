@@ -1,7 +1,6 @@
 package se.bonniernews.bnappauth_android
 
 import android.annotation.SuppressLint
-import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Context.MODE_PRIVATE
 import android.content.Intent
@@ -13,8 +12,6 @@ import net.openid.appauth.AuthorizationException.AuthorizationRequestErrors.OTHE
 import net.openid.appauth.AuthorizationRequest.Prompt.CONSENT
 import net.openid.appauth.AuthorizationRequest.Prompt.SELECT_ACCOUNT
 import net.openid.appauth.AuthorizationRequest.Scope
-import org.json.JSONException
-import org.json.JSONObject
 
 interface BNAppAuth {
     val isAuthorized: Boolean
@@ -35,6 +32,7 @@ interface BNAppAuth {
 
     fun getIdToken(
         forceRefresh: Boolean = false,
+        getLoginToken: Boolean = false,
         callback: (tokenResponse: TokenResponse?, exception: BnAppAuthException?) -> Unit
     )
 
@@ -64,6 +62,7 @@ interface BNAppAuth {
     data class TokenResponse(
         val idToken: String?,
         val bnIdToken: String? = null,
+        val loginToken: String? = null,
         val isUpdated: Boolean = false,
     )
 }
@@ -176,6 +175,7 @@ class BNAppAuthImpl : BNAppAuth {
 
     override fun getIdToken(
         forceRefresh: Boolean,
+        getLoginToken: Boolean,
         callback: (tokenResponse: BNAppAuth.TokenResponse?, exception: BnAppAuthException?) -> Unit
     ) {
         if (!::config.isInitialized) {
@@ -193,8 +193,9 @@ class BNAppAuthImpl : BNAppAuth {
             return
         }
 
-        authState?.needsTokenRefresh = forceRefresh
-        authState?.performActionWithFreshTokens(service,
+        authState?.needsTokenRefresh = forceRefresh || getLoginToken
+        val refreshParams = mapOf("issue_login_token" to (getLoginToken).toString())
+        authState?.performActionWithFreshTokens(service, refreshParams,
             AuthState.AuthStateAction { _, token, ex ->
                 ex?.let {
                     Logger.error("performActionWithFreshTokens=$it", config.debuggable)
@@ -202,17 +203,14 @@ class BNAppAuthImpl : BNAppAuth {
                     return@AuthStateAction
                 }
 
-                val bnIdToken: String? = if (config.customScopes?.contains("old_bnidtoken") == true) {
-                    authState?.lastTokenResponse?.let { resp ->
-                        try {
-                            (JSONObject(resp.jsonSerializeString()).optJSONObject("additionalParameters"))
-                                ?.optString("old_bnidtoken", null)
-                        } catch (e: JSONException) {
-                            Logger.error("Failed to parse bnIdToken from token response: $e", config.debuggable)
-                            null
-                        }
-                    }
-                } else null
+                var bnIdToken: String? = null
+                var bnLoginToken: String? = null
+
+                val params = getAdditionalParameters(authState?.lastTokenResponse)
+                if (params != null) {
+                    bnIdToken = params["old_bnidtoken"]
+                    bnLoginToken = params["login_token"]
+                }
 
                 val isUpdated = token != currentIdToken
                 writeAuthState(authState)
@@ -220,10 +218,14 @@ class BNAppAuthImpl : BNAppAuth {
                 Logger.debug("accessToken=${authState?.accessToken}", config.debuggable)
                 Logger.debug("refreshToken=${authState?.refreshToken}", config.debuggable)
                 Logger.debug("bnIdToken=$bnIdToken", config.debuggable)
-                callback(BNAppAuth.TokenResponse(token, bnIdToken, isUpdated), null)
+                Logger.debug("bnLoginToken=$bnLoginToken", config.debuggable)
+                callback(BNAppAuth.TokenResponse(token, bnIdToken, bnLoginToken, isUpdated), null)
             }
         )
     }
+
+    @VisibleForTesting
+    internal fun getAdditionalParameters(resp: TokenResponse?) = resp?.additionalParameters
 
     @VisibleForTesting
     fun performTokenRequest(

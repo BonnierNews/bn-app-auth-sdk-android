@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight.Companion.Bold
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.net.toUri
 import se.bonniernews.appAuthExample.ui.theme.BNAppAuthExampleApp_AndroidTheme
 import se.bonniernews.appAuthExample.ui.theme.Black
 import se.bonniernews.appAuthExample.ui.theme.Gray
@@ -45,22 +46,10 @@ import se.bonniernews.bnappauth_android.BNAppAuth
 class MainActivity : ComponentActivity() {
 
     private val appAuth = BNAppAuth.instance
-    private val authScheme = "custom.redirect.scheme"
-    private val loginRedirectURL = "$authScheme://www.test.se/login"
-    private val logoutRedirectUrl = "$authScheme://www.test.se/logout"
-
-    private val config = BNAppAuth.ClientConfiguration(
-        issuer = Uri.parse("https://oidc-provider.com/"),
-        clientId = "client-id",
-        clientSecret = null,
-        loginRedirectURL = Uri.parse(loginRedirectURL),
-        logoutRedirectUrl = Uri.parse(logoutRedirectUrl),
-        debuggable = true
-    )
-
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val config = (applicationContext as? AuthApplication)?.config ?: return
         appAuth.configure(this, config)
 
         buildLayout()
@@ -110,11 +99,24 @@ class MainActivity : ComponentActivity() {
                                     .fillMaxWidth()
                                     .padding(32.dp, 16.dp, 32.dp, 0.dp),
                                 onClick = {
-                                    appAuth.getIdToken(true) { _, exception ->
+                                    appAuth.getIdToken(forceRefresh = true) { tokenResp, exception ->
                                         exception?.let {
                                             //TODO: Handle exception
                                         }
-                                        buildLayout(idToken)
+                                        buildLayout(tokenResp?.idToken)
+                                    }
+                                }
+                            )
+                            AuthButton("Get Login Token",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp, 16.dp, 32.dp, 0.dp),
+                                onClick = {
+                                    appAuth.getIdToken(getLoginToken = true) { tokenResp, exception ->
+                                        exception?.let {
+                                            //TODO: Handle exception
+                                        }
+                                        buildLayout(tokenResp?.idToken)
                                     }
                                 }
                             )
