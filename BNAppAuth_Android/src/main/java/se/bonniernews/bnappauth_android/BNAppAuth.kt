@@ -7,11 +7,19 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import androidx.annotation.VisibleForTesting
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import net.openid.appauth.*
 import net.openid.appauth.AuthorizationException.AuthorizationRequestErrors.OTHER
 import net.openid.appauth.AuthorizationRequest.Prompt.CONSENT
 import net.openid.appauth.AuthorizationRequest.Prompt.SELECT_ACCOUNT
 import net.openid.appauth.AuthorizationRequest.Scope
+import kotlin.coroutines.resume
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.Mutex
+import androidx.core.content.edit
 
 interface BNAppAuth {
     val isAuthorized: Boolean
@@ -72,6 +80,8 @@ class BNAppAuthImpl : BNAppAuth {
     companion object {
         const val SHARED_PREFS_NAME = "bn_auth_shared_prefs"
         const val SHARED_PREFS_KEY = "stateJson"
+        const val MIGRATION_PREFS_NAME = "bn_migration_prefs"
+        const val MIGRATION_PREFS_KEY = "bn_migration_completed"
     }
 
     @VisibleForTesting
@@ -79,6 +89,8 @@ class BNAppAuthImpl : BNAppAuth {
 
     @VisibleForTesting
     var authPrefs: SharedPreferences? = null
+
+    var migrationPrefs: SharedPreferences? = null
 
     @VisibleForTesting
     var authService: AuthorizationService? = null
@@ -92,10 +104,22 @@ class BNAppAuthImpl : BNAppAuth {
     @VisibleForTesting
     var authState: AuthState? = null
 
+    private val authMutex = Mutex()
+    private val scope = CoroutineScope(Dispatchers.Main + kotlinx.coroutines.SupervisorJob())
+
+    private var needsMigration: Boolean
+        get() {
+            val isCompleted = migrationPrefs?.getBoolean(MIGRATION_PREFS_KEY, false) ?: false
+            return !isCompleted
+        }
+        set(value) {
+            migrationPrefs?.edit { putBoolean(MIGRATION_PREFS_KEY, !value) }
+        }
 
     override fun configure(context: Context, config: BNAppAuth.ClientConfiguration) {
         this.config = config
         authPrefs = context.getSharedPreferences(SHARED_PREFS_NAME, MODE_PRIVATE)
+        migrationPrefs = context.getSharedPreferences(MIGRATION_PREFS_NAME, MODE_PRIVATE)
         authService = AuthorizationService(context)
         authState = readAuthState()
     }
@@ -183,51 +207,77 @@ class BNAppAuthImpl : BNAppAuth {
             callback(null, null)
             return
         }
-        if (!isAuthorized) {
-            callback(null, null)
-            return
-        }
+
         val service = authService ?: run {
             Logger.error("performActionWithFreshTokens authService is null", config.debuggable)
             callback(null, BnAppAuthException.convert(OTHER))
             return
         }
 
-        authState?.needsTokenRefresh = forceRefresh || getLoginToken
-        val refreshParams = mapOf("issue_login_token" to (getLoginToken).toString())
-        authState?.performActionWithFreshTokens(service, refreshParams,
-            AuthState.AuthStateAction { _, token, ex ->
-                ex?.let {
-                    Logger.error("performActionWithFreshTokens=$it", config.debuggable)
-                    callback(null, BnAppAuthException.convert(it))
-                    return@AuthStateAction
+        scope.launch {
+            authMutex.withLock {
+                val idToken = authState?.idToken
+
+                if (needsMigration && idToken != null) {
+                    needsMigration = false
+                    val success = performSilentExchange(idToken)
+                    if (!success) {
+                        clearState()
+                        callback(null, BnAppAuthException.convert(OTHER))
+                        return@launch
+                    }
                 }
-
-                var bnIdToken: String? = null
-                var bnLoginToken: String? = null
-
-                val params = getAdditionalParameters(authState?.lastTokenResponse)
-                if (params != null) {
-                    bnIdToken = params["old_bnidtoken"]
-                    bnLoginToken = params["login_token"]
-                }
-
-                val isUpdated = token != currentIdToken
-                writeAuthState(authState)
-                Logger.debug("idToken=$token", config.debuggable)
-                Logger.debug("accessToken=${authState?.accessToken}", config.debuggable)
-                Logger.debug("refreshToken=${authState?.refreshToken}", config.debuggable)
-                Logger.debug("bnIdToken=$bnIdToken", config.debuggable)
-                Logger.debug("bnLoginToken=$bnLoginToken", config.debuggable)
-                callback(BNAppAuth.TokenResponse(token, bnIdToken, bnLoginToken, isUpdated), null)
             }
-        )
+
+            if (!isAuthorized) {
+                callback(null, null)
+                return@launch
+            }
+
+            authState?.needsTokenRefresh = forceRefresh || getLoginToken
+            val refreshParams = mapOf("issue_login_token" to (getLoginToken).toString())
+            authState?.performActionWithFreshTokens(
+                service, refreshParams,
+                AuthState.AuthStateAction { _, token, ex ->
+                    ex?.let {
+                        Logger.error("performActionWithFreshTokens=$it", config.debuggable)
+                        callback(null, BnAppAuthException.convert(it))
+                        return@AuthStateAction
+                    }
+
+                    var bnIdToken: String? = null
+                    var bnLoginToken: String? = null
+
+                    val params = getAdditionalParameters(authState?.lastTokenResponse)
+                    if (params != null) {
+                        bnIdToken = params["old_bnidtoken"]
+                        bnLoginToken = params["login_token"]
+                    }
+
+                    val isUpdated = token != currentIdToken
+                    writeAuthState(authState)
+                    Logger.debug("idToken=$token", config.debuggable)
+                    Logger.debug("accessToken=${authState?.accessToken}", config.debuggable)
+                    Logger.debug("refreshToken=${authState?.refreshToken}", config.debuggable)
+                    Logger.debug("bnIdToken=$bnIdToken", config.debuggable)
+                    Logger.debug("bnLoginToken=$bnLoginToken", config.debuggable)
+                    callback(
+                        BNAppAuth.TokenResponse(token, bnIdToken, bnLoginToken, isUpdated),
+                        null
+                    )
+                }
+            )
+        }
     }
 
+    private suspend fun performSilentExchange(oldIdToken: String): Boolean = suspendCancellableCoroutine { continuation ->
+        exchangeIdTokenAppAuth(oldIdToken, config.issuer.buildUpon().appendPath("exchange").build()) { token, ex ->
+            continuation.resume(ex == null && token != null)
+        }
+    }
     fun exchangeIdTokenAppAuth(
         oldIdToken: String,
         newExchangeEndpoint: Uri, // full Url
-        exchangePath: String, // or path
         callback: (idToken: String?, exception: BnAppAuthException?) -> Unit
     ) {
         authServiceSdk.fetchFromIssuer(config) { serviceConfiguration, ex ->
@@ -235,10 +285,6 @@ class BNAppAuthImpl : BNAppAuth {
                 callback(null, BnAppAuthException.convert(ex ?: OTHER))
                 return@fetchFromIssuer
             }
-
-//            val newExchangeEndpoint = config.issuer.buildUpon()
-//                .appendEncodedPath(exchangePath)
-//                .build()
 
             // 1. Create a config pointing to the NEW exchange endpoint
             val customConfig = AuthorizationServiceConfiguration(
@@ -251,7 +297,7 @@ class BNAppAuthImpl : BNAppAuth {
                 .setGrantType("urn:ietf:params:oauth:grant-type:token-exchange")
                 // Set the scopes from your ClientConfiguration
                 .setScopes(buildString {
-                    append(AuthorizationRequest.Scope.OPENID)
+                    append(Scope.OPENID)
                     config.customScopes?.let { scopes ->
                         if (scopes.isNotEmpty()) append(" ${scopes.joinToString(" ")}")
                     }
@@ -312,6 +358,7 @@ class BNAppAuthImpl : BNAppAuth {
         intent: Intent,
         callback: (idToken: String?, exception: BnAppAuthException?) -> Unit
     ) {
+        needsMigration = false
         val resp = authServiceSdk.authorizationResponseFromIntent(intent)
         val ex = authServiceSdk.authorizationExceptionFromIntent(intent)
 
@@ -386,18 +433,20 @@ class BNAppAuthImpl : BNAppAuth {
         return state
     }
 
-    @SuppressLint("ApplySharedPref")
     @VisibleForTesting
     fun writeAuthState(state: AuthState?) {
-        state ?: return
-        currentIdToken = state.idToken
-        authPrefs?.edit()?.putString(SHARED_PREFS_KEY, state.jsonSerializeString())?.commit()
+        val nonNullState = state ?: return
+        this.authState = nonNullState
+        currentIdToken = nonNullState.idToken
+        authPrefs?.edit {
+            putString(SHARED_PREFS_KEY, nonNullState.jsonSerializeString())
+        }
     }
 
     @VisibleForTesting
     override fun clearState() {
         authState = null
-        authPrefs?.edit()?.clear()?.apply()
+        authPrefs?.edit { remove(SHARED_PREFS_KEY) }
     }
 
     override fun releaseResources() {
