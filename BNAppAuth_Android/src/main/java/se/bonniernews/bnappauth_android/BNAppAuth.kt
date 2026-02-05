@@ -224,6 +224,70 @@ class BNAppAuthImpl : BNAppAuth {
         )
     }
 
+    fun exchangeIdTokenAppAuth(
+        oldIdToken: String,
+        newExchangeEndpoint: Uri, // full Url
+        exchangePath: String, // or path
+        callback: (idToken: String?, exception: BnAppAuthException?) -> Unit
+    ) {
+        authServiceSdk.fetchFromIssuer(config) { serviceConfiguration, ex ->
+            if (ex != null || serviceConfiguration == null) {
+                callback(null, BnAppAuthException.convert(ex ?: OTHER))
+                return@fetchFromIssuer
+            }
+
+//            val newExchangeEndpoint = config.issuer.buildUpon()
+//                .appendEncodedPath(exchangePath)
+//                .build()
+
+            // 1. Create a config pointing to the NEW exchange endpoint
+            val customConfig = AuthorizationServiceConfiguration(
+                serviceConfiguration.authorizationEndpoint,
+                newExchangeEndpoint
+            )
+
+            // 2. Build the request with Scopes
+            val tokenRequest = TokenRequest.Builder(customConfig, config.clientId)
+                .setGrantType("urn:ietf:params:oauth:grant-type:token-exchange")
+                // Set the scopes from your ClientConfiguration
+                .setScopes(buildString {
+                    append(AuthorizationRequest.Scope.OPENID)
+                    config.customScopes?.let { scopes ->
+                        if (scopes.isNotEmpty()) append(" ${scopes.joinToString(" ")}")
+                    }
+                })
+                .setAdditionalParameters(mapOf(
+                    "subject_token" to oldIdToken,
+                    "subject_token_type" to "urn:ietf:params:oauth:token-type:id_token"
+                ))
+                .build()
+
+            // 3. Perform the request using your internal helper
+            performTokenRequest(tokenRequest) { idToken, exception ->
+                if (exception != null) {
+                    callback(null, exception)
+                    return@performTokenRequest
+                }
+
+                // 4. TRANSITION TO ORDINARY FLOW
+                // We create a fresh AuthState using the STANDARD serviceConfiguration (ordinary token endpoint)
+                // but we apply the successful response we just got from the custom endpoint.
+                val lastResponse = authState?.lastTokenResponse
+                if (lastResponse != null) {
+                    val ordinaryState = AuthState(serviceConfiguration)
+                    // This 'update' ensures the access_token and refresh_token are now
+                    // associated with the ordinary discovery doc for future refreshes.
+                    ordinaryState.update(lastResponse, null)
+
+                    this.authState = ordinaryState
+                    writeAuthState(ordinaryState)
+                }
+
+                callback(idToken, null)
+            }
+        }
+    }
+
     @VisibleForTesting
     internal fun getAdditionalParameters(resp: TokenResponse?) = resp?.additionalParameters
 
