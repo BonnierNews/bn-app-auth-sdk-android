@@ -104,7 +104,9 @@ class BNAppAuthImpl : BNAppAuth {
     var authState: AuthState? = null
 
     private val authMutex = Mutex()
-    private val scope = CoroutineScope(Dispatchers.Main + kotlinx.coroutines.SupervisorJob())
+
+    @VisibleForTesting
+    val scope = CoroutineScope(Dispatchers.Main + kotlinx.coroutines.SupervisorJob())
 
     private var needsMigration: Boolean
         get() {
@@ -336,7 +338,6 @@ class BNAppAuthImpl : BNAppAuth {
 
                     this.authState = ordinaryState
                     this.currentIdToken = tokenResponse.idToken
-
                     writeAuthState(ordinaryState)
                 }
 
