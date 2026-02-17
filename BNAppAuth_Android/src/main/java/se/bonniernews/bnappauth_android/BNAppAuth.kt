@@ -1,6 +1,5 @@
 package se.bonniernews.bnappauth_android
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Context.MODE_PRIVATE
 import android.content.Intent
@@ -270,14 +269,21 @@ class BNAppAuthImpl : BNAppAuth {
         }
     }
 
-    private suspend fun performSilentExchange(oldIdToken: String): Boolean = suspendCancellableCoroutine { continuation ->
-        exchangeIdTokenAppAuth(oldIdToken, config.issuer.buildUpon().appendPath("exchange").build()) { token, ex ->
-            continuation.resume(ex == null && token != null)
+    private suspend fun performSilentExchange(oldIdToken: String): Boolean =
+        suspendCancellableCoroutine { continuation ->
+            exchangeIdTokenAppAuth(
+                oldIdToken,
+                config.issuer.buildUpon()
+                    .appendPath("token")
+                    .build()
+            ) { token, ex ->
+                continuation.resume(ex == null && token != null)
+            }
         }
-    }
+
     fun exchangeIdTokenAppAuth(
         oldIdToken: String,
-        newExchangeEndpoint: Uri, // full Url
+        newExchangeEndpoint: Uri,
         callback: (idToken: String?, exception: BnAppAuthException?) -> Unit
     ) {
         authServiceSdk.fetchFromIssuer(config) { serviceConfiguration, ex ->
@@ -286,46 +292,51 @@ class BNAppAuthImpl : BNAppAuth {
                 return@fetchFromIssuer
             }
 
-            // 1. Create a config pointing to the NEW exchange endpoint
             val customConfig = AuthorizationServiceConfiguration(
                 serviceConfiguration.authorizationEndpoint,
                 newExchangeEndpoint
             )
 
-            // 2. Build the request with Scopes
             val tokenRequest = TokenRequest.Builder(customConfig, config.clientId)
                 .setGrantType("urn:ietf:params:oauth:grant-type:token-exchange")
-                // Set the scopes from your ClientConfiguration
                 .setScopes(buildString {
                     append(Scope.OPENID)
                     config.customScopes?.let { scopes ->
                         if (scopes.isNotEmpty()) append(" ${scopes.joinToString(" ")}")
                     }
                 })
-                .setAdditionalParameters(mapOf(
-                    "subject_token" to oldIdToken,
-                    "subject_token_type" to "urn:ietf:params:oauth:token-type:id_token"
-                ))
+                .setAdditionalParameters(
+                    mapOf(
+                        "subject_token" to oldIdToken,
+                        "subject_token_type" to "urn:ietf:params:oauth:token-type:id_token"
+                    )
+                )
                 .build()
 
-            // 3. Perform the request using your internal helper
             performTokenRequest(tokenRequest) { idToken, exception ->
                 if (exception != null) {
                     callback(null, exception)
                     return@performTokenRequest
                 }
 
-                // 4. TRANSITION TO ORDINARY FLOW
-                // We create a fresh AuthState using the STANDARD serviceConfiguration (ordinary token endpoint)
-                // but we apply the successful response we just got from the custom endpoint.
-                val lastResponse = authState?.lastTokenResponse
-                if (lastResponse != null) {
-                    val ordinaryState = AuthState(serviceConfiguration)
-                    // This 'update' ensures the access_token and refresh_token are now
-                    // associated with the ordinary discovery doc for future refreshes.
-                    ordinaryState.update(lastResponse, null)
+                val tokenResponse = authState?.lastTokenResponse
+                if (tokenResponse != null) {
+                    val authRequest = AuthorizationRequest.Builder(
+                        serviceConfiguration,
+                        config.clientId,
+                        ResponseTypeValues.CODE,
+                        config.loginRedirectURL
+                    ).setScopes(buildString {
+                        append(Scope.OPENID)
+                        config.customScopes?.let { append(" ${it.joinToString(" ")}") }
+                    }).build()
+
+                    val authResponse = AuthorizationResponse.Builder(authRequest).build()
+                    val ordinaryState = AuthState(authResponse, tokenResponse, null)
 
                     this.authState = ordinaryState
+                    this.currentIdToken = tokenResponse.idToken
+
                     writeAuthState(ordinaryState)
                 }
 
@@ -438,15 +449,14 @@ class BNAppAuthImpl : BNAppAuth {
         val nonNullState = state ?: return
         this.authState = nonNullState
         currentIdToken = nonNullState.idToken
-        authPrefs?.edit {
-            putString(SHARED_PREFS_KEY, nonNullState.jsonSerializeString())
-        }
+        authPrefs?.edit(commit = true) { putString(SHARED_PREFS_KEY, nonNullState.jsonSerializeString()) }
     }
 
     @VisibleForTesting
     override fun clearState() {
         authState = null
-        authPrefs?.edit { remove(SHARED_PREFS_KEY) }
+        currentIdToken = null
+        authPrefs?.edit(commit = true) { remove(SHARED_PREFS_KEY) }
     }
 
     override fun releaseResources() {
