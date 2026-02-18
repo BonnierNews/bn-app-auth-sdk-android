@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
 import net.openid.appauth.AuthState
 import net.openid.appauth.AuthState.AuthStateAction
@@ -715,5 +716,52 @@ class BNAppAuthTest {
         } catch (_: Exception) {}
 
         field.set(obj, value)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `multiple concurrent getIdToken calls during migration only perform one network request`() = runTest {
+        // Given
+        val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", this)
+
+        val realConfig = AuthorizationServiceConfiguration(
+            Uri.parse("https://test.se/auth"),
+            Uri.parse("https://test.se/token")
+        )
+
+        appAuth.authState = authState
+        doNothing().whenever(appAuth).writeAuthState(anyOrNull())
+        whenever(authState.idToken).thenReturn("old_id_token")
+        whenever(migrationPrefs.getBoolean(any(), eq(false))).thenReturn(false)
+
+        whenever(authServiceSdk.fetchFromIssuer(any(), any())).thenAnswer { args ->
+            val callback = args.getArgument<(AuthorizationServiceConfiguration?, Exception?) -> Unit>(1)
+            callback(realConfig, null)
+        }
+
+        whenever(authService.performTokenRequest(any(), any())).thenAnswer { args ->
+            val callback = args.arguments[1] as AuthorizationService.TokenResponseCallback
+            callback.onTokenRequestCompleted(tokenResponse, null)
+        }
+
+        // When
+        val totalCalls = 10
+        val results = mutableListOf<BNAppAuth.TokenResponse?>()
+
+        repeat(totalCalls) {
+            launch {
+                appAuth.getIdToken { response, _ ->
+                    synchronized(results) { results.add(response) }
+                }
+            }
+        }
+
+        advanceUntilIdle()
+
+        // Then:
+        assertEquals(totalCalls, results.size)
+        verify(authService, times(1)).performTokenRequest(any(), any())
+        verify(migrationEditor).putBoolean(eq(BNAppAuthImpl.MIGRATION_PREFS_KEY), eq(true))
     }
 }

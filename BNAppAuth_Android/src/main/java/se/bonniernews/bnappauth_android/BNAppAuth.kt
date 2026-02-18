@@ -103,6 +103,7 @@ class BNAppAuthImpl : BNAppAuth {
     @VisibleForTesting
     var authState: AuthState? = null
 
+    private var isMigrationDone = false
     private val authMutex = Mutex()
 
     @VisibleForTesting
@@ -114,7 +115,7 @@ class BNAppAuthImpl : BNAppAuth {
             return !isCompleted
         }
         set(value) {
-            migrationPrefs?.edit { putBoolean(MIGRATION_PREFS_KEY, !value) }
+            migrationPrefs?.edit(commit = true) { putBoolean(MIGRATION_PREFS_KEY, !value) }
         }
 
     override fun configure(context: Context, config: BNAppAuth.ClientConfiguration) {
@@ -217,10 +218,13 @@ class BNAppAuthImpl : BNAppAuth {
 
         scope.launch {
             authMutex.withLock {
+
+                val migrationStillNeeded = !isMigrationDone && needsMigration
                 val idToken = authState?.idToken
 
-                if (needsMigration && idToken != null) {
+                if (migrationStillNeeded && idToken != null) {
                     needsMigration = false
+                    isMigrationDone = true
                     val success = performSilentExchange(idToken)
                     if (!success) {
                         clearState()
