@@ -25,7 +25,6 @@ import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
 import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.doNothing
-import org.mockito.kotlin.doReturn
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
@@ -77,7 +76,8 @@ class BNAppAuthTest {
         clientSecret = null,
         loginRedirectURL = Uri.parse("test://login_url"),
         logoutRedirectUrl = Uri.parse("test://logout_url"),
-        debuggable = true
+        debuggable = true,
+        useMigration = true
     )
 
     private val authException = AuthorizationException(
@@ -632,6 +632,7 @@ class BNAppAuthTest {
         assertEquals("login_token", resultTokenResponse?.loginToken)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun `migration creates synthetic auth state correctly`() = runTest {
         val appAuth = spy(bnAppAuth)
@@ -705,19 +706,6 @@ class BNAppAuthTest {
         verify(appAuth).clearState()
     }
 
-    fun mockProperty(obj: Any, propertyName: String, value: Any) {
-        val field = obj.javaClass.getDeclaredField(propertyName)
-        field.isAccessible = true
-
-        try {
-            val modifiersField = field.javaClass.getDeclaredField("modifiers")
-            modifiersField.isAccessible = true
-            modifiersField.setInt(field, field.modifiers and java.lang.reflect.Modifier.FINAL.inv())
-        } catch (_: Exception) {}
-
-        field.set(obj, value)
-    }
-
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun `multiple concurrent getIdToken calls during migration only perform one network request`() = runTest {
@@ -763,5 +751,40 @@ class BNAppAuthTest {
         assertEquals(totalCalls, results.size)
         verify(authService, times(1)).performTokenRequest(any(), any())
         verify(migrationEditor).putBoolean(eq(BNAppAuthImpl.MIGRATION_PREFS_KEY), eq(true))
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `getIdToken does not perform migration when useMigration config is false`() = runTest {
+        // Given
+        val disabledConfig = config.copy(useMigration = false)
+        configure(disabledConfig)
+        val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", this)
+        appAuth.authState = authState
+        whenever(authState.idToken).thenReturn("old_id_token")
+        whenever(migrationPrefs.getBoolean(eq(BNAppAuthImpl.MIGRATION_PREFS_KEY), any())).thenReturn(false)
+        whenever(authState.isAuthorized).thenReturn(true)
+
+        // When
+        appAuth.getIdToken { _, _ -> }
+        advanceUntilIdle()
+
+        // Then
+        verify(authService, never()).performTokenRequest(any(), any())
+        verify(migrationEditor, never()).putBoolean(eq(BNAppAuthImpl.MIGRATION_PREFS_KEY), any())
+    }
+
+    fun mockProperty(obj: Any, propertyName: String, value: Any) {
+        val field = obj.javaClass.getDeclaredField(propertyName)
+        field.isAccessible = true
+
+        try {
+            val modifiersField = field.javaClass.getDeclaredField("modifiers")
+            modifiersField.isAccessible = true
+            modifiersField.setInt(field, field.modifiers and java.lang.reflect.Modifier.FINAL.inv())
+        } catch (_: Exception) {}
+
+        field.set(obj, value)
     }
 }

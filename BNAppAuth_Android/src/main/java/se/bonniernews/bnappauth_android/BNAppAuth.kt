@@ -64,6 +64,7 @@ interface BNAppAuth {
         val prompt: String = "$SELECT_ACCOUNT $CONSENT",
         val customScopes: List<String>? = null,
         val debuggable: Boolean = false,
+        val useMigration: Boolean = false
     )
 
     data class TokenResponse(
@@ -111,6 +112,7 @@ class BNAppAuthImpl : BNAppAuth {
 
     private var needsMigration: Boolean
         get() {
+            if (!config.useMigration) return false
             val isCompleted = migrationPrefs?.getBoolean(MIGRATION_PREFS_KEY, false) ?: false
             return !isCompleted
         }
