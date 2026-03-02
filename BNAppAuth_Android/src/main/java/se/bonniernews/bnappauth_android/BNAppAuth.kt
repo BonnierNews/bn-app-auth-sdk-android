@@ -139,6 +139,10 @@ class BNAppAuthImpl : BNAppAuth {
             return
         }
 
+        if (config.useMigration) {
+            needsMigration = false
+        }
+
         authServiceSdk.fetchFromIssuer(config) { serviceConfiguration, ex ->
             ex?.let {
                 Logger.error("login=$it", config.debuggable)
