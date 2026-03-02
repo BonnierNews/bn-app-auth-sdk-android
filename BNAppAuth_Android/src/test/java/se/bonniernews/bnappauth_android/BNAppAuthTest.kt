@@ -4,6 +4,9 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceUntilIdle
 import net.openid.appauth.AuthState
 import net.openid.appauth.AuthState.AuthStateAction
 import net.openid.appauth.AuthorizationException
@@ -12,6 +15,7 @@ import net.openid.appauth.AuthorizationService
 import net.openid.appauth.AuthorizationServiceConfiguration
 import net.openid.appauth.TokenRequest
 import net.openid.appauth.TokenResponse
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -20,6 +24,8 @@ import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
 import org.mockito.kotlin.anyOrNull
+import org.mockito.kotlin.doNothing
+import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.spy
@@ -29,12 +35,17 @@ import org.mockito.kotlin.verifyNoInteractions
 import org.mockito.kotlin.whenever
 import org.robolectric.RobolectricTestRunner
 
-
 @RunWith(RobolectricTestRunner::class)
 class BNAppAuthTest {
 
     @Mock
     lateinit var authPrefs: SharedPreferences
+
+    @Mock
+    lateinit var migrationPrefs: SharedPreferences
+
+    @Mock
+    lateinit var migrationEditor: SharedPreferences.Editor
 
     @Mock
     lateinit var authService: AuthorizationService
@@ -65,7 +76,8 @@ class BNAppAuthTest {
         clientSecret = null,
         loginRedirectURL = Uri.parse("test://login_url"),
         logoutRedirectUrl = Uri.parse("test://logout_url"),
-        debuggable = true
+        debuggable = true,
+        useMigration = true
     )
 
     private val authException = AuthorizationException(
@@ -82,6 +94,7 @@ class BNAppAuthTest {
     private fun configure(configuration: BNAppAuth.ClientConfiguration = config) {
         bnAppAuth.config = configuration
         bnAppAuth.authPrefs = authPrefs
+        bnAppAuth.migrationPrefs = migrationPrefs
         bnAppAuth.authService = authService
         bnAppAuth.authServiceSdk = authServiceSdk
     }
@@ -95,6 +108,11 @@ class BNAppAuthTest {
         MockitoAnnotations.openMocks(this)
         bnAppAuth = BNAppAuth.instance
         configure()
+
+        whenever(migrationPrefs.edit()).thenReturn(migrationEditor)
+        whenever(migrationEditor.putBoolean(any(), any())).thenReturn(migrationEditor)
+        whenever(migrationEditor.apply()).then { /* do nothing */ }
+        whenever(migrationEditor.commit()).thenReturn(true)
     }
 
     @Test
@@ -102,6 +120,7 @@ class BNAppAuthTest {
         // Given
         val appAuth = spy(bnAppAuth)
         val intent = fakeIntent(config.loginRedirectURL.toString())
+        doNothing().whenever(appAuth).writeAuthState(any())
         whenever(authService.getAuthorizationRequestIntent(any())).thenReturn(intent)
         whenever(authServiceSdk.fetchFromIssuer(any(), any())).thenAnswer { args ->
             args.getArgument<(AuthorizationServiceConfiguration?, Exception?) -> Unit>(1)
@@ -145,6 +164,7 @@ class BNAppAuthTest {
         val locale = "sv-SE"
         val appAuth = spy(bnAppAuth)
         val intent = fakeIntent(config.loginRedirectURL.toString())
+        doNothing().whenever(appAuth).writeAuthState(any())
         whenever(authService.getAuthorizationRequestIntent(any())).thenReturn(intent)
         whenever(authServiceSdk.fetchFromIssuer(any(), any())).thenAnswer { args ->
             args.getArgument<(AuthorizationServiceConfiguration?, Exception?) -> Unit>(1)
@@ -169,6 +189,7 @@ class BNAppAuthTest {
         // Given
         val appAuth = spy(bnAppAuth)
         val intent = fakeIntent(config.loginRedirectURL.toString())
+        doNothing().whenever(appAuth).writeAuthState(any())
         whenever(authService.getAuthorizationRequestIntent(any())).thenReturn(intent)
         whenever(authServiceSdk.fetchFromIssuer(any(), any())).thenAnswer { args ->
             args.getArgument<(AuthorizationServiceConfiguration?, Exception?) -> Unit>(1)
@@ -194,6 +215,7 @@ class BNAppAuthTest {
         val locale = "sv-SE"
         val appAuth = spy(bnAppAuth)
         val intent = fakeIntent(config.loginRedirectURL.toString())
+        doNothing().whenever(appAuth).writeAuthState(any())
         whenever(authService.getAuthorizationRequestIntent(any())).thenReturn(intent)
         whenever(authServiceSdk.fetchFromIssuer(any(), any())).thenAnswer { args ->
             args.getArgument<(AuthorizationServiceConfiguration?, Exception?) -> Unit>(1)
@@ -250,6 +272,7 @@ class BNAppAuthTest {
         val intent = fakeIntent(config.loginRedirectURL.toString())
         val appAuth = spy(bnAppAuth)
         appAuth.authState = authState
+        doNothing().whenever(appAuth).writeAuthState(any())
         whenever(authState.idToken).thenReturn("idToken")
         whenever(authorizationResponse.createTokenExchangeRequest()).thenReturn(tokenRequest)
         whenever(authServiceSdk.authorizationResponseFromIntent(intent)).thenReturn(
@@ -280,6 +303,7 @@ class BNAppAuthTest {
         // Given
         val intent = fakeIntent(config.logoutRedirectUrl.toString())
         val appAuth = spy(bnAppAuth)
+        doNothing().whenever(appAuth).clearState()
         whenever(authServiceSdk.authorizationResponseFromIntent(intent)).thenReturn(
             authorizationResponse
         )
@@ -343,12 +367,17 @@ class BNAppAuthTest {
         assertNull(exceptionTest)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `getIdToken returns idToken`() {
+    fun `getIdToken returns idToken`() = runTest {
         // Given
         val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", this)
         appAuth.authState = authState
         appAuth.currentIdToken = "idToken"
+
+        doNothing().whenever(appAuth).writeAuthState(any())
+        whenever(migrationPrefs.getBoolean(BNAppAuthImpl.MIGRATION_PREFS_KEY, false)).thenReturn(true)
         whenever(authState.isAuthorized).thenReturn(true)
         whenever(authState.idToken).thenReturn("idToken")
         whenever(authState.performActionWithFreshTokens(any(), any<Map<String, String>>(), any())).thenAnswer { args ->
@@ -367,6 +396,8 @@ class BNAppAuthTest {
             exceptionTest = exception
         }
 
+        advanceUntilIdle()
+
         //Then
         verify(appAuth).writeAuthState(any())
         assertEquals("idToken", tokenResponseTest?.idToken)
@@ -374,10 +405,12 @@ class BNAppAuthTest {
         assertNull(exceptionTest)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `tokenResponseTest is null if AuthStateAction has exception when calling getIdToken`() {
+    fun `tokenResponseTest is null if AuthStateAction has exception when calling getIdToken`() = runTest {
         // Given
         val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", this)
         appAuth.authState = authState
         whenever(authState.isAuthorized).thenReturn(true)
 
@@ -393,17 +426,23 @@ class BNAppAuthTest {
             exceptionTest = exception
         }
 
+        advanceUntilIdle()
+
         //Then
         assertNull(tokenResponseTest)
         assertEquals(exceptionTest, bnAppAuthException)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `getIdToken with forceRefresh returns tokenResponse with isUpdated=true`() {
+    fun `getIdToken with forceRefresh returns tokenResponse with isUpdated=true`() = runTest {
         // Given
         val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", this)
         appAuth.authState = authState
         appAuth.currentIdToken = "idTokenOld"
+
+        doNothing().whenever(appAuth).writeAuthState(any())
         whenever(authState.isAuthorized).thenReturn(true)
         whenever(authState.createTokenRefreshRequest()).thenReturn(tokenRequest)
         whenever(authState.performActionWithFreshTokens(any(), any<Map<String, String>>(), any())).thenAnswer { args ->
@@ -421,6 +460,8 @@ class BNAppAuthTest {
             tokenResponseTest = tokenResponse
             exceptionTest = exception
         }
+
+        advanceUntilIdle()
 
         //Then
         verify(appAuth).writeAuthState(any())
@@ -503,9 +544,9 @@ class BNAppAuthTest {
         assertEquals(builder.scope, "openid profile offline_access customScope1 customScope2")
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `getIdToken sets old_bnidtoken if customScopes has old_bnidtoken`() {
-        // Given
+    fun `getIdToken sets old_bnidtoken if customScopes has old_bnidtoken`() = runTest {
         val config = BNAppAuth.ClientConfiguration(
             issuer = Uri.parse("https://test.se/oidc/"),
             clientId = "app",
@@ -517,12 +558,20 @@ class BNAppAuthTest {
         )
         configure(config)
         val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", this)
         appAuth.authState = authState
 
+        doNothing().whenever(appAuth).writeAuthState(any())
         whenever(authState.isAuthorized).thenReturn(true)
         whenever(appAuth.getAdditionalParameters(anyOrNull())).thenReturn(mapOf("old_bnidtoken" to "old_bnidtoken"))
 
-        whenever(authState.performActionWithFreshTokens(any(), any<Map<String, String>>(), any())).thenAnswer { args ->
+        whenever(
+            authState.performActionWithFreshTokens(
+                any(),
+                any<Map<String, String>>(),
+                any()
+            )
+        ).thenAnswer { args ->
             (args.arguments[2] as? AuthStateAction)?.execute(
                 "accessToken",
                 "idToken",
@@ -536,12 +585,15 @@ class BNAppAuthTest {
             resultTokenResponse = response
         }
 
+        advanceUntilIdle()
+
         // Then
         assertEquals("old_bnidtoken", resultTokenResponse?.bnIdToken)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Test
-    fun `getIdToken with getLoginToken=true sets login_token from response`() {
+    fun `getIdToken with getLoginToken=true sets login_token from response`() = runTest {
         // Given
         val config = BNAppAuth.ClientConfiguration(
             issuer = Uri.parse("https://test.se/oidc/"),
@@ -553,8 +605,10 @@ class BNAppAuthTest {
         )
         configure(config)
         val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", this)
         appAuth.authState = authState
 
+        doNothing().whenever(appAuth).writeAuthState(any())
         whenever(authState.isAuthorized).thenReturn(true)
         whenever(appAuth.getAdditionalParameters(anyOrNull())).thenReturn(mapOf("login_token" to "login_token"))
 
@@ -572,7 +626,165 @@ class BNAppAuthTest {
             resultTokenResponse = response
         }
 
+        advanceUntilIdle()
+
         // Then
         assertEquals("login_token", resultTokenResponse?.loginToken)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `migration creates synthetic auth state correctly`() = runTest {
+        val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", this)
+
+        val realConfig = AuthorizationServiceConfiguration(
+            Uri.parse("https://test.se/auth"),
+            Uri.parse("https://test.se/token")
+        )
+
+        appAuth.authState = authState
+        whenever(authState.lastTokenResponse).thenReturn(tokenResponse)
+        doNothing().whenever(appAuth).writeAuthState(anyOrNull())
+
+        whenever(authState.authorizationServiceConfiguration).thenReturn(realConfig)
+        whenever(authState.idToken).thenReturn("old_id_token")
+
+        whenever(migrationPrefs.getBoolean(any(), any())).thenReturn(false)
+
+        whenever(authServiceSdk.fetchFromIssuer(any(), any())).thenAnswer { args ->
+            val callback = args.getArgument<(AuthorizationServiceConfiguration?, Exception?) -> Unit>(1)
+            callback(realConfig, null)
+        }
+
+        whenever(authService.performTokenRequest(any(), any())).thenAnswer { args ->
+            (args.arguments[1] as AuthorizationService.TokenResponseCallback)
+                .onTokenRequestCompleted(tokenResponse, null)
+        }
+
+        // When
+        appAuth.getIdToken { _, _ -> }
+        advanceUntilIdle()
+
+        // Then
+        verify(appAuth, times(2)).writeAuthState(anyOrNull())
+        verify(migrationEditor).putBoolean(eq(BNAppAuthImpl.MIGRATION_PREFS_KEY), eq(true))
+        verify(authState).update(eq(tokenResponse), anyOrNull())
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `migration failure clears state and returns exception`() = runTest {
+        val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", this)
+
+        val realConfig = AuthorizationServiceConfiguration(
+            Uri.parse("https://test.se/auth"),
+            Uri.parse("https://test.se/token")
+        )
+
+        doNothing().whenever(appAuth).clearState()
+        whenever(authState.isAuthorized).thenReturn(true)
+        whenever(authState.idToken).thenReturn("old_id_token")
+        appAuth.authState = authState
+        whenever(migrationPrefs.getBoolean(any(), any())).thenReturn(false)
+        whenever(authServiceSdk.fetchFromIssuer(any(), any())).thenAnswer { args ->
+            args.getArgument<(AuthorizationServiceConfiguration?, Exception?) -> Unit>(1)
+                .invoke(realConfig, null)
+        }
+
+        whenever(authService.performTokenRequest(any(), any())).thenAnswer { args ->
+            val callback = args.arguments[1] as AuthorizationService.TokenResponseCallback
+            callback.onTokenRequestCompleted(null, authException)
+        }
+
+        // When
+        appAuth.getIdToken { _, _ -> }
+        advanceUntilIdle()
+
+        // Then
+        verify(appAuth).clearState()
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `multiple concurrent getIdToken calls during migration only perform one network request`() = runTest {
+        // Given
+        val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", this)
+
+        val realConfig = AuthorizationServiceConfiguration(
+            Uri.parse("https://test.se/auth"),
+            Uri.parse("https://test.se/token")
+        )
+
+        appAuth.authState = authState
+        doNothing().whenever(appAuth).writeAuthState(anyOrNull())
+        whenever(authState.idToken).thenReturn("old_id_token")
+        whenever(migrationPrefs.getBoolean(any(), eq(false))).thenReturn(false)
+
+        whenever(authServiceSdk.fetchFromIssuer(any(), any())).thenAnswer { args ->
+            val callback = args.getArgument<(AuthorizationServiceConfiguration?, Exception?) -> Unit>(1)
+            callback(realConfig, null)
+        }
+
+        whenever(authService.performTokenRequest(any(), any())).thenAnswer { args ->
+            val callback = args.arguments[1] as AuthorizationService.TokenResponseCallback
+            callback.onTokenRequestCompleted(tokenResponse, null)
+        }
+
+        // When
+        val totalCalls = 10
+        val results = mutableListOf<BNAppAuth.TokenResponse?>()
+
+        repeat(totalCalls) {
+            launch {
+                appAuth.getIdToken { response, _ ->
+                    synchronized(results) { results.add(response) }
+                }
+            }
+        }
+
+        advanceUntilIdle()
+
+        // Then:
+        assertEquals(totalCalls, results.size)
+        verify(authService, times(1)).performTokenRequest(any(), any())
+        verify(migrationEditor).putBoolean(eq(BNAppAuthImpl.MIGRATION_PREFS_KEY), eq(true))
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `getIdToken does not perform migration when useMigration config is false`() = runTest {
+        // Given
+        val disabledConfig = config.copy(useMigration = false)
+        configure(disabledConfig)
+        val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", this)
+        appAuth.authState = authState
+        whenever(authState.idToken).thenReturn("old_id_token")
+        whenever(migrationPrefs.getBoolean(eq(BNAppAuthImpl.MIGRATION_PREFS_KEY), any())).thenReturn(false)
+        whenever(authState.isAuthorized).thenReturn(true)
+
+        // When
+        appAuth.getIdToken { _, _ -> }
+        advanceUntilIdle()
+
+        // Then
+        verify(authService, never()).performTokenRequest(any(), any())
+        verify(migrationEditor, never()).putBoolean(eq(BNAppAuthImpl.MIGRATION_PREFS_KEY), any())
+    }
+
+    fun mockProperty(obj: Any, propertyName: String, value: Any) {
+        val field = obj.javaClass.getDeclaredField(propertyName)
+        field.isAccessible = true
+
+        try {
+            val modifiersField = field.javaClass.getDeclaredField("modifiers")
+            modifiersField.isAccessible = true
+            modifiersField.setInt(field, field.modifiers and java.lang.reflect.Modifier.FINAL.inv())
+        } catch (_: Exception) {}
+
+        field.set(obj, value)
     }
 }

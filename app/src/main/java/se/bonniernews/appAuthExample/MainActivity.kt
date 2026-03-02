@@ -61,6 +61,17 @@ class MainActivity : ComponentActivity() {
             }
             buildLayout(tokenResponse?.idToken)
         }
+
+//        repeat(10) { i ->
+//            appAuth.getIdToken { tokenResponse, exception ->
+//                if (exception != null) {
+//                    println("Test $i: Failed with ${exception.errorDescription}")
+//                } else {
+//                    println("Test $i: Success! Token starts with: ${tokenResponse?.idToken?.take(10)}")
+//                }
+//                buildLayout(tokenResponse?.idToken)
+//            }
+//        }
     }
 
     private fun buildLayout(idToken: String? = null) {
