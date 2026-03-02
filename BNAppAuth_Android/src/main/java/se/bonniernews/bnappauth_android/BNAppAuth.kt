@@ -380,7 +380,6 @@ class BNAppAuthImpl : BNAppAuth {
         intent: Intent,
         callback: (idToken: String?, exception: BnAppAuthException?) -> Unit
     ) {
-        needsMigration = false
         val resp = authServiceSdk.authorizationResponseFromIntent(intent)
         val ex = authServiceSdk.authorizationExceptionFromIntent(intent)
 
