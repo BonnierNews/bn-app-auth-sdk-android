@@ -139,6 +139,10 @@ class BNAppAuthImpl : BNAppAuth {
             return
         }
 
+        if (config.useMigration) {
+            needsMigration = false
+        }
+
         authServiceSdk.fetchFromIssuer(config) { serviceConfiguration, ex ->
             ex?.let {
                 Logger.error("login=$it", config.debuggable)
@@ -376,7 +380,6 @@ class BNAppAuthImpl : BNAppAuth {
         intent: Intent,
         callback: (idToken: String?, exception: BnAppAuthException?) -> Unit
     ) {
-        needsMigration = false
         val resp = authServiceSdk.authorizationResponseFromIntent(intent)
         val ex = authServiceSdk.authorizationExceptionFromIntent(intent)
 
