@@ -235,49 +235,75 @@ class BNAppAuthImpl : BNAppAuth {
                     if (!success) {
                         clearState()
                         callback(null, BnAppAuthException.convert(OTHER))
-                        return@launch
+                        return@withLock
                     }
                 }
-            }
 
-            if (!isAuthorized) {
-                callback(null, null)
-                return@launch
-            }
-
-            authState?.needsTokenRefresh = forceRefresh || getLoginToken
-            val refreshParams = mapOf("issue_login_token" to (getLoginToken).toString())
-            authState?.performActionWithFreshTokens(
-                service, refreshParams,
-                AuthState.AuthStateAction { _, token, ex ->
-                    ex?.let {
-                        Logger.error("performActionWithFreshTokens=$it", config.debuggable)
-                        callback(null, BnAppAuthException.convert(it))
-                        return@AuthStateAction
-                    }
-
-                    var bnIdToken: String? = null
-                    var bnLoginToken: String? = null
-
+                if (!(getLoginToken || forceRefresh) && isAuthorized && authState?.needsTokenRefresh == false) {
                     val params = getAdditionalParameters(authState?.lastTokenResponse)
-                    if (params != null) {
-                        bnIdToken = params["old_bnidtoken"]
-                        bnLoginToken = params["login_token"]
-                    }
-
-                    val isUpdated = token != currentIdToken
-                    writeAuthState(authState)
-                    Logger.debug("idToken=$token", config.debuggable)
-                    Logger.debug("accessToken=${authState?.accessToken}", config.debuggable)
-                    Logger.debug("refreshToken=${authState?.refreshToken}", config.debuggable)
-                    Logger.debug("bnIdToken=$bnIdToken", config.debuggable)
-                    Logger.debug("bnLoginToken=$bnLoginToken", config.debuggable)
                     callback(
-                        BNAppAuth.TokenResponse(token, bnIdToken, bnLoginToken, isUpdated),
-                        null
-                    )
+                        BNAppAuth.TokenResponse(
+                            authState?.idToken,
+                            params?.get("old_bnidtoken"),
+                            params?.get("login_token"),
+                            false
+                        ), null)
+                    return@withLock
                 }
-            )
+
+                if (!isAuthorized) {
+                    callback(null, null)
+                    return@withLock
+                }
+
+                // Define the job to keep the Mutex open
+                val refreshJob = kotlinx.coroutines.CompletableDeferred<Unit>()
+
+                authState?.needsTokenRefresh = forceRefresh || getLoginToken
+                val refreshParams = mapOf("issue_login_token" to (getLoginToken).toString())
+
+                authState?.performActionWithFreshTokens(
+                    service, refreshParams,
+                    AuthState.AuthStateAction { _, token, ex ->
+                        try {
+                            ex?.let {
+                                Logger.error("performActionWithFreshTokens=$it", config.debuggable)
+                                callback(null, BnAppAuthException.convert(it))
+                                return@AuthStateAction
+                            }
+
+                            var bnIdToken: String? = null
+                            var bnLoginToken: String? = null
+
+                            val params = getAdditionalParameters(authState?.lastTokenResponse)
+                            if (params != null) {
+                                bnIdToken = params["old_bnidtoken"]
+                                bnLoginToken = params["login_token"]
+                            }
+
+                            val isUpdated = token != currentIdToken
+                            writeAuthState(authState)
+
+                            Logger.debug("idToken=$token", config.debuggable)
+                            Logger.debug("accessToken=${authState?.accessToken}", config.debuggable)
+                            Logger.debug("refreshToken=${authState?.refreshToken}", config.debuggable)
+                            Logger.debug("bnIdToken=$bnIdToken", config.debuggable)
+                            Logger.debug("bnLoginToken=$bnLoginToken", config.debuggable)
+
+                            callback(
+                                BNAppAuth.TokenResponse(token, bnIdToken, bnLoginToken, isUpdated),
+                                null
+                            )
+                        } finally {
+                            // Signal that the work is done and Mutex can be released
+                            refreshJob.complete(Unit)
+                        }
+                    }
+                )
+
+                // Suspend the block inside the lock until refreshJob.complete() is called
+                refreshJob.await()
+            }
         }
     }
 

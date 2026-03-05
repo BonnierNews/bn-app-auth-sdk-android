@@ -36,16 +36,28 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import okhttp3.Dispatcher
 import se.bonniernews.appAuthExample.ui.theme.BNAppAuthExampleApp_AndroidTheme
 import se.bonniernews.appAuthExample.ui.theme.Black
 import se.bonniernews.appAuthExample.ui.theme.Gray
 import se.bonniernews.appAuthExample.ui.theme.White
 import se.bonniernews.bnappauth_android.BNAppAuth
+import kotlin.coroutines.resume
 
 
 class MainActivity : ComponentActivity() {
 
     private val appAuth = BNAppAuth.instance
+    val authLock = Mutex()
+    val dispatcherProvider = CoroutineScope(Dispatchers.IO)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,16 +74,40 @@ class MainActivity : ComponentActivity() {
             buildLayout(tokenResponse?.idToken)
         }
 
-//        repeat(10) { i ->
-//            appAuth.getIdToken { tokenResponse, exception ->
-//                if (exception != null) {
-//                    println("Test $i: Failed with ${exception.errorDescription}")
-//                } else {
-//                    println("Test $i: Success! Token starts with: ${tokenResponse?.idToken?.take(10)}")
-//                }
+//        dispatcherProvider.launch {
+//            val tokenResponse = getIdToken()
+//            CoroutineScope(Dispatchers.Main).launch {
 //                buildLayout(tokenResponse?.idToken)
 //            }
 //        }
+
+        repeat(10) { i ->
+            dispatcherProvider.launch {
+                val tokenResponse = getIdToken()
+                println("TokenResp $i ${tokenResponse?.idToken?.take(10)}")
+                CoroutineScope(Dispatchers.Main).launch {
+                    buildLayout(tokenResponse?.idToken)
+                }
+            }
+        }
+
+    }
+
+    suspend fun getIdToken(forceRefresh: Boolean = false, getLoginToken: Boolean = false) = authLock.withLock {
+        suspendCancellableCoroutine { cont ->
+            val exceptionHandler = CoroutineExceptionHandler { _, exception ->
+                cont.resume(null)
+            }
+
+            appAuth.getIdToken(
+                forceRefresh = forceRefresh,
+                getLoginToken = getLoginToken
+            ) { tokenResponse, exception ->
+                dispatcherProvider.launch(exceptionHandler) {
+                    cont.resume(tokenResponse)
+                }
+            }
+        }
     }
 
     private fun buildLayout(idToken: String? = null) {
@@ -110,10 +146,8 @@ class MainActivity : ComponentActivity() {
                                     .fillMaxWidth()
                                     .padding(32.dp, 16.dp, 32.dp, 0.dp),
                                 onClick = {
-                                    appAuth.getIdToken(forceRefresh = true) { tokenResp, exception ->
-                                        exception?.let {
-                                            //TODO: Handle exception
-                                        }
+                                    dispatcherProvider.launch {
+                                        val tokenResp = getIdToken(forceRefresh = true)
                                         buildLayout(tokenResp?.idToken)
                                     }
                                 }
@@ -123,11 +157,9 @@ class MainActivity : ComponentActivity() {
                                     .fillMaxWidth()
                                     .padding(32.dp, 16.dp, 32.dp, 0.dp),
                                 onClick = {
-                                    appAuth.getIdToken(getLoginToken = true) { tokenResp, exception ->
-                                        exception?.let {
-                                            //TODO: Handle exception
-                                        }
-                                        buildLayout(tokenResp?.idToken)
+                                    dispatcherProvider.launch {
+                                        val tokenResp = getIdToken(getLoginToken = true)
+                                        buildLayout(tokenResp?.loginToken)
                                     }
                                 }
                             )
