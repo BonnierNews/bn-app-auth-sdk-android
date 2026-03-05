@@ -4,9 +4,15 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestDispatcher
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.resetMain
 import net.openid.appauth.AuthState
 import net.openid.appauth.AuthState.AuthStateAction
 import net.openid.appauth.AuthorizationException
@@ -16,10 +22,16 @@ import net.openid.appauth.AuthorizationServiceConfiguration
 import net.openid.appauth.TokenRequest
 import net.openid.appauth.TokenResponse
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TestRule
+import org.junit.runner.Description
 import org.junit.runner.RunWith
+import org.junit.runners.model.Statement
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.any
@@ -34,12 +46,20 @@ import org.mockito.kotlin.verify
 import org.mockito.kotlin.verifyNoInteractions
 import org.mockito.kotlin.whenever
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 
 @RunWith(RobolectricTestRunner::class)
 class BNAppAuthTest {
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @get:Rule
+    val mainDispatcherRule = MainDispatcherRule()
+
     @Mock
     lateinit var authPrefs: SharedPreferences
+
+    @Mock
+    lateinit var authEditor: SharedPreferences.Editor
 
     @Mock
     lateinit var migrationPrefs: SharedPreferences
@@ -103,16 +123,38 @@ class BNAppAuthTest {
         data = Uri.parse(url)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     @Before
     fun setup() {
+        val testDispatcher = UnconfinedTestDispatcher()
+        Dispatchers.setMain(testDispatcher)
+
         MockitoAnnotations.openMocks(this)
+
         bnAppAuth = BNAppAuth.instance
+        bnAppAuth.authState = null
+        bnAppAuth.currentIdToken = null
+
+        mockProperty(bnAppAuth, "isMigrationDone", false)
+        mockProperty(bnAppAuth, "scope", CoroutineScope(testDispatcher + SupervisorJob()))
+
         configure()
 
         whenever(migrationPrefs.edit()).thenReturn(migrationEditor)
         whenever(migrationEditor.putBoolean(any(), any())).thenReturn(migrationEditor)
-        whenever(migrationEditor.apply()).then { /* do nothing */ }
+        whenever(migrationEditor.remove(any())).thenReturn(migrationEditor) // Add this for safety
         whenever(migrationEditor.commit()).thenReturn(true)
+
+        whenever(authPrefs.edit()).thenReturn(authEditor)
+        whenever(authEditor.putString(any(), any())).thenReturn(authEditor)
+        whenever(authEditor.remove(any())).thenReturn(authEditor)
+        whenever(authEditor.commit()).thenReturn(true)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @After
+    fun tearDown() {
+        Dispatchers.resetMain()
     }
 
     @Test
@@ -391,7 +433,7 @@ class BNAppAuthTest {
         // When
         var tokenResponseTest: BNAppAuth.TokenResponse? = null
         var exceptionTest: Exception? = null
-        appAuth.getIdToken { tokenResponse, exception ->
+        appAuth.getIdToken(forceRefresh = true) { tokenResponse, exception ->
             tokenResponseTest = tokenResponse
             exceptionTest = exception
         }
@@ -421,7 +463,7 @@ class BNAppAuthTest {
         // When
         var tokenResponseTest: BNAppAuth.TokenResponse? = null
         var exceptionTest: Exception? = null
-        appAuth.getIdToken { tokenResponse, exception ->
+        appAuth.getIdToken(forceRefresh = true) { tokenResponse, exception ->
             tokenResponseTest = tokenResponse
             exceptionTest = exception
         }
@@ -699,7 +741,7 @@ class BNAppAuthTest {
         }
 
         // When
-        appAuth.getIdToken { _, _ -> }
+        appAuth.getIdToken(forceRefresh = true) { _, _ -> }
         advanceUntilIdle()
 
         // Then
@@ -756,23 +798,132 @@ class BNAppAuthTest {
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun `getIdToken does not perform migration when useMigration config is false`() = runTest {
+        // 1. Create one dispatcher for everyone to share
+        val testDispatcher = UnconfinedTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+
         // Given
         val disabledConfig = config.copy(useMigration = false)
         configure(disabledConfig)
         val appAuth = spy(bnAppAuth)
-        mockProperty(appAuth, "scope", this)
+
+        // 2. Inject a scope that uses the SAME testDispatcher
+        mockProperty(appAuth, "scope", CoroutineScope(testDispatcher + SupervisorJob()))
+
         appAuth.authState = authState
         whenever(authState.idToken).thenReturn("old_id_token")
-        whenever(migrationPrefs.getBoolean(eq(BNAppAuthImpl.MIGRATION_PREFS_KEY), any())).thenReturn(false)
         whenever(authState.isAuthorized).thenReturn(true)
+
+        // 3. Mock the callback so the await() finishes
+        whenever(authState.performActionWithFreshTokens(any(), any<Map<String, String>>(), any())).thenAnswer { args ->
+            val action = args.getArgument<AuthState.AuthStateAction>(2)
+            action.execute("fresh_token", "fresh_id_token", null)
+        }
 
         // When
         appAuth.getIdToken { _, _ -> }
+
+        // 4. Advance time
         advanceUntilIdle()
 
         // Then
         verify(authService, never()).performTokenRequest(any(), any())
         verify(migrationEditor, never()).putBoolean(eq(BNAppAuthImpl.MIGRATION_PREFS_KEY), any())
+
+        // 5. Clean up
+        Dispatchers.resetMain()
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `getIdToken clears state if migration silent exchange fails`() = runTest {
+        // Given
+        val testDispatcher = UnconfinedTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", CoroutineScope(testDispatcher + SupervisorJob()))
+
+        appAuth.authState = authState
+        whenever(authState.idToken).thenReturn("expired_old_token")
+        whenever(migrationPrefs.getBoolean(any(), any())).thenReturn(false) // Migration needed
+
+        whenever(authServiceSdk.fetchFromIssuer(any(), any())).thenAnswer { args ->
+            val callback = args.getArgument<(AuthorizationServiceConfiguration?, Exception?) -> Unit>(1)
+            callback(null, authException)
+        }
+
+        // When
+        var exceptionTest: Exception? = null
+        appAuth.getIdToken { _, ex -> exceptionTest = ex }
+        advanceUntilIdle()
+
+        // Then
+        verify(appAuth).clearState()
+        assertNotNull(exceptionTest)
+        Dispatchers.resetMain()
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `getIdToken handles corrupt auth state JSON by treating user as unauthorized`() = runTest {
+        // Given
+        val testDispatcher = UnconfinedTestDispatcher(testScheduler)
+        Dispatchers.setMain(testDispatcher)
+        val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", CoroutineScope(testDispatcher + SupervisorJob()))
+
+        whenever(authPrefs.getString(eq(BNAppAuthImpl.SHARED_PREFS_KEY), anyOrNull()))
+            .thenReturn("NOT_VALID_JSON_!!!")
+
+        val context = RuntimeEnvironment.getApplication()
+        appAuth.configure(context, config)
+
+        // When
+        var tokenResponseTest: BNAppAuth.TokenResponse? = null
+        appAuth.getIdToken { response, _ ->
+            tokenResponseTest = response
+        }
+
+        advanceUntilIdle()
+
+        // Then
+        assertNull(tokenResponseTest)
+        assertNull(appAuth.authState)
+
+        Dispatchers.resetMain()
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `getIdToken returns cached token immediately if already fresh`() = runTest {
+        // Given
+        val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", this)
+        appAuth.authState = authState
+
+        mockProperty(appAuth, "isMigrationDone", true)
+
+        whenever(authState.isAuthorized).thenReturn(true)
+        whenever(authState.needsTokenRefresh).thenReturn(false)
+        whenever(authState.idToken).thenReturn("cached_id_token")
+        whenever(authState.lastTokenResponse).thenReturn(tokenResponse)
+        whenever(appAuth.getAdditionalParameters(anyOrNull())).thenReturn(mapOf("login_token" to "cached_login_token"))
+
+        // When
+        var result: BNAppAuth.TokenResponse? = null
+        appAuth.getIdToken(forceRefresh = false) { response, _ ->
+            result = response
+        }
+
+        advanceUntilIdle()
+
+        // Then
+        assertEquals("cached_id_token", result?.idToken)
+        assertEquals("cached_login_token", result?.loginToken)
+        assertEquals(false, result?.isUpdated)
+
+        // Verify that we NEVER reached the refresh logic
+        verify(authState, never()).performActionWithFreshTokens(any(), any<Map<String, String>>(), any())
     }
 
     fun mockProperty(obj: Any, propertyName: String, value: Any) {
@@ -786,5 +937,22 @@ class BNAppAuthTest {
         } catch (_: Exception) {}
 
         field.set(obj, value)
+    }
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class MainDispatcherRule(
+    val testDispatcher: TestDispatcher = UnconfinedTestDispatcher(),
+) : TestRule {
+    override fun apply(base: Statement, description: Description): Statement = object : Statement() {
+        @Throws(Throwable::class)
+        override fun evaluate() {
+            Dispatchers.setMain(testDispatcher)
+            try {
+                base.evaluate()
+            } finally {
+                Dispatchers.resetMain()
+            }
+        }
     }
 }
