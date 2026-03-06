@@ -19,6 +19,7 @@ import kotlin.coroutines.resume
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.Mutex
 import androidx.core.content.edit
+import kotlinx.coroutines.cancelChildren
 
 interface BNAppAuth {
     val isAuthorized: Boolean
@@ -216,14 +217,14 @@ class BNAppAuthImpl : BNAppAuth {
             return
         }
 
-        val service = authService ?: run {
-            Logger.error("performActionWithFreshTokens authService is null", config.debuggable)
-            callback(null, BnAppAuthException.convert(OTHER))
-            return
-        }
-
         scope.launch {
             authMutex.withLock {
+
+                val service = authService ?: run {
+                    Logger.error("performActionWithFreshTokens authService is null", config.debuggable)
+                    callback(null, BnAppAuthException.convert(OTHER))
+                    return@withLock
+                }
 
                 val migrationStillNeeded = !isMigrationDone && needsMigration
                 val idToken = authState?.idToken
@@ -496,6 +497,7 @@ class BNAppAuthImpl : BNAppAuth {
     }
 
     override fun releaseResources() {
+        scope.coroutineContext.cancelChildren()
         authService?.dispose()
         authService = null
     }
