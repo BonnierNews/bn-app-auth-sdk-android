@@ -145,6 +145,7 @@ class BNAppAuthImpl : BNAppAuth {
         }
 
         authServiceSdk.fetchFromIssuer(config) { serviceConfiguration, ex ->
+            if (authService == null) return@fetchFromIssuer
             ex?.let {
                 Logger.error("login=$it", config.debuggable)
                 callback(null, BnAppAuthException.convert(it))
@@ -267,6 +268,11 @@ class BNAppAuthImpl : BNAppAuth {
                     service, refreshParams,
                     AuthState.AuthStateAction { _, token, ex ->
                         try {
+                            if (authService == null) {
+                                refreshJob.complete(Unit)
+                                return@AuthStateAction
+                            }
+
                             ex?.let {
                                 Logger.error("performActionWithFreshTokens=$it", config.debuggable)
                                 callback(null, BnAppAuthException.convert(it))
@@ -326,6 +332,7 @@ class BNAppAuthImpl : BNAppAuth {
         callback: (idToken: String?, exception: BnAppAuthException?) -> Unit
     ) {
         authServiceSdk.fetchFromIssuer(config) { serviceConfiguration, ex ->
+            if (authService == null) return@fetchFromIssuer
             if (ex != null || serviceConfiguration == null) {
                 callback(null, BnAppAuthException.convert(ex ?: OTHER))
                 return@fetchFromIssuer
@@ -392,6 +399,7 @@ class BNAppAuthImpl : BNAppAuth {
         callback: (idToken: String?, exception: BnAppAuthException?) -> Unit
     ) {
         authService?.performTokenRequest(request) PerformRequest@{ response, exception ->
+            if (authService == null) return@PerformRequest
             authState?.update(response, exception)
             exception?.let {
                 Logger.error("performTokenRequest=$it", config.debuggable)
