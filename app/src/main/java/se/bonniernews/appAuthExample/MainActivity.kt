@@ -1,7 +1,6 @@
 package se.bonniernews.appAuthExample
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -35,16 +34,12 @@ import androidx.compose.ui.text.font.FontWeight.Companion.Bold
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.net.toUri
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import okhttp3.Dispatcher
 import se.bonniernews.appAuthExample.ui.theme.BNAppAuthExampleApp_AndroidTheme
 import se.bonniernews.appAuthExample.ui.theme.Black
 import se.bonniernews.appAuthExample.ui.theme.Gray
@@ -56,7 +51,6 @@ import kotlin.coroutines.resume
 class MainActivity : ComponentActivity() {
 
     private val appAuth = BNAppAuth.instance
-    val authLock = Mutex()
     val dispatcherProvider = CoroutineScope(Dispatchers.IO)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,10 +84,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-
     }
 
-    suspend fun getIdToken(forceRefresh: Boolean = false, getLoginToken: Boolean = false) = authLock.withLock {
+    suspend fun getIdToken(forceRefresh: Boolean = false, getLoginToken: Boolean = false) =
         suspendCancellableCoroutine { cont ->
             val exceptionHandler = CoroutineExceptionHandler { _, exception ->
                 cont.resume(null)
@@ -108,9 +101,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-    }
 
-    private fun buildLayout(idToken: String? = null) {
+    private fun buildLayout(idToken: String? = null, headline: String? = "idToken") {
         setContent {
             BNAppAuthExampleApp_AndroidTheme {
                 Surface(
@@ -133,7 +125,8 @@ class MainActivity : ComponentActivity() {
                             color = White,
                         )
                         if (appAuth.isAuthorized) {
-                            AuthButton("Logga ut",
+                            AuthButton(
+                                "Logga ut",
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(32.dp, 16.dp, 32.dp, 0.dp),
@@ -141,7 +134,8 @@ class MainActivity : ComponentActivity() {
                                     logout()
                                 }
                             )
-                            AuthButton("Force refresh",
+                            AuthButton(
+                                "Force refresh",
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(32.dp, 16.dp, 32.dp, 0.dp),
@@ -152,21 +146,22 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             )
-                            AuthButton("Get Login Token",
+                            AuthButton(
+                                "Get Login Token",
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(32.dp, 16.dp, 32.dp, 0.dp),
                                 onClick = {
                                     dispatcherProvider.launch {
                                         val tokenResp = getIdToken(getLoginToken = true)
-                                        buildLayout(tokenResp?.loginToken)
+                                        buildLayout(tokenResp?.loginToken, "loginToken")
                                     }
                                 }
                             )
                             AuthClickableText(
                                 buildAnnotatedString {
                                     withStyle(style = SpanStyle(fontWeight = Bold)) {
-                                        append("IdToken:\n")
+                                        append("$headline:\n")
                                     }
                                     append(idToken)
                                 },
@@ -177,9 +172,10 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         } else {
-                            AuthButton("Logga in", modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(32.dp, 16.dp, 32.dp, 0.dp),
+                            AuthButton(
+                                "Logga in", modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp, 16.dp, 32.dp, 0.dp),
                                 onClick = {
                                     login()
                                 })

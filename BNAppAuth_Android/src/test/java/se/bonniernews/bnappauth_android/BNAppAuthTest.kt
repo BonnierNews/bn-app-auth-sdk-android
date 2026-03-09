@@ -938,6 +938,80 @@ class BNAppAuthTest {
 
         field.set(obj, value)
     }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `getIdToken returns LIFECYCLE_ABORT_CODE if authService becomes null during refresh`() = runTest {
+        // Given
+        val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", this)
+        appAuth.authState = authState
+
+        mockProperty(appAuth, "isMigrationDone", true)
+        whenever(authState.isAuthorized).thenReturn(true)
+
+        whenever(authState.performActionWithFreshTokens(any(), any<Map<String, String>>(), any())).thenAnswer { args ->
+            // SIMULATE DISPOSE
+            appAuth.authService = null
+            (args.arguments[2] as? AuthStateAction)?.execute("token", "id", null)
+        }
+
+        // When
+        var exceptionTest: BnAppAuthException? = null
+        appAuth.getIdToken(forceRefresh = true) { _, exception ->
+            exceptionTest = exception
+        }
+
+        advanceUntilIdle()
+
+        // Then
+        assertNotNull(exceptionTest)
+        assertEquals(BNAppAuthImpl.LIFECYCLE_ABORT_CODE, exceptionTest?.code)
+    }
+
+    @Test
+    fun `login returns LIFECYCLE_ABORT_CODE if authService is cleared during discovery`() {
+        // Given
+        val appAuth = spy(bnAppAuth)
+        whenever(authServiceSdk.fetchFromIssuer(any(), any())).thenAnswer { args ->
+            // SIMULATE DISPOSE
+            appAuth.authService = null
+            val callback = args.getArgument<(AuthorizationServiceConfiguration?, Exception?) -> Unit>(1)
+            callback(authorizationServiceConfiguration, null)
+        }
+
+        // When
+        var exceptionTest: BnAppAuthException? = null
+        appAuth.login(null) { _, exception ->
+            exceptionTest = exception
+        }
+
+        // Then
+        assertNotNull(exceptionTest)
+        assertEquals(BNAppAuthImpl.LIFECYCLE_ABORT_CODE, exceptionTest?.code)
+    }
+
+    @Test
+    fun `exchangeIdTokenAppAuth returns LIFECYCLE_ABORT_CODE if authService is cleared`() {
+        // Given
+        val appAuth = spy(bnAppAuth)
+        whenever(authServiceSdk.fetchFromIssuer(any(), any())).thenAnswer { args ->
+            // SIMULATE DISPOSE
+            appAuth.authService = null
+            val callback = args.getArgument<(AuthorizationServiceConfiguration?, Exception?) -> Unit>(1)
+            callback(authorizationServiceConfiguration, null)
+        }
+
+        // When
+        var exceptionTest: BnAppAuthException? = null
+        appAuth.exchangeIdTokenAppAuth("old_token", Uri.parse("https://test.se/token")) { _, exception ->
+            exceptionTest = exception
+        }
+
+        // Then
+        assertNotNull(exceptionTest)
+        assertEquals(BNAppAuthImpl.LIFECYCLE_ABORT_CODE, exceptionTest?.code)
+    }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
