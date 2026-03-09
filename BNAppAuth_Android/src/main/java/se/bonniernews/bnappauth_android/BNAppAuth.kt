@@ -19,6 +19,7 @@ import kotlin.coroutines.resume
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.Mutex
 import androidx.core.content.edit
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancelChildren
 
 interface BNAppAuth {
@@ -83,6 +84,7 @@ class BNAppAuthImpl : BNAppAuth {
         const val SHARED_PREFS_KEY = "stateJson"
         const val MIGRATION_PREFS_NAME = "bn_migration_prefs"
         const val MIGRATION_PREFS_KEY = "bn_migration_completed"
+        const val LIFECYCLE_ABORT_CODE = -999
     }
 
     @VisibleForTesting
@@ -145,7 +147,10 @@ class BNAppAuthImpl : BNAppAuth {
         }
 
         authServiceSdk.fetchFromIssuer(config) { serviceConfiguration, ex ->
-            if (authService == null) return@fetchFromIssuer
+            if (authService == null) {
+                callback(null, getLifecycleAbortException())
+                return@fetchFromIssuer
+            }
             ex?.let {
                 Logger.error("login=$it", config.debuggable)
                 callback(null, BnAppAuthException.convert(it))
@@ -222,8 +227,11 @@ class BNAppAuthImpl : BNAppAuth {
             authMutex.withLock {
 
                 val service = authService ?: run {
-                    Logger.error("performActionWithFreshTokens authService is null", config.debuggable)
-                    callback(null, BnAppAuthException.convert(OTHER))
+                    Logger.error(
+                        "performActionWithFreshTokens authService is null",
+                        config.debuggable
+                    )
+                    callback(null, getLifecycleAbortException())
                     return@withLock
                 }
 
@@ -249,7 +257,8 @@ class BNAppAuthImpl : BNAppAuth {
                             params?.get("old_bnidtoken"),
                             params?.get("login_token"),
                             false
-                        ), null)
+                        ), null
+                    )
                     return@withLock
                 }
 
@@ -259,7 +268,7 @@ class BNAppAuthImpl : BNAppAuth {
                 }
 
                 // Define the job to keep the Mutex open
-                val refreshJob = kotlinx.coroutines.CompletableDeferred<Unit>()
+                val refreshJob = CompletableDeferred<Unit>()
 
                 authState?.needsTokenRefresh = forceRefresh || getLoginToken
                 val refreshParams = mapOf("issue_login_token" to (getLoginToken).toString())
@@ -270,6 +279,7 @@ class BNAppAuthImpl : BNAppAuth {
                         try {
                             if (authService == null) {
                                 refreshJob.complete(Unit)
+                                callback(null, getLifecycleAbortException())
                                 return@AuthStateAction
                             }
 
@@ -293,7 +303,10 @@ class BNAppAuthImpl : BNAppAuth {
 
                             Logger.debug("idToken=$token", config.debuggable)
                             Logger.debug("accessToken=${authState?.accessToken}", config.debuggable)
-                            Logger.debug("refreshToken=${authState?.refreshToken}", config.debuggable)
+                            Logger.debug(
+                                "refreshToken=${authState?.refreshToken}",
+                                config.debuggable
+                            )
                             Logger.debug("bnIdToken=$bnIdToken", config.debuggable)
                             Logger.debug("bnLoginToken=$bnLoginToken", config.debuggable)
 
@@ -332,7 +345,10 @@ class BNAppAuthImpl : BNAppAuth {
         callback: (idToken: String?, exception: BnAppAuthException?) -> Unit
     ) {
         authServiceSdk.fetchFromIssuer(config) { serviceConfiguration, ex ->
-            if (authService == null) return@fetchFromIssuer
+            if (authService == null) {
+                callback(null, getLifecycleAbortException())
+                return@fetchFromIssuer
+            }
             if (ex != null || serviceConfiguration == null) {
                 callback(null, BnAppAuthException.convert(ex ?: OTHER))
                 return@fetchFromIssuer
@@ -399,7 +415,10 @@ class BNAppAuthImpl : BNAppAuth {
         callback: (idToken: String?, exception: BnAppAuthException?) -> Unit
     ) {
         authService?.performTokenRequest(request) PerformRequest@{ response, exception ->
-            if (authService == null) return@PerformRequest
+            if (authService == null) {
+                callback(null, getLifecycleAbortException())
+                return@PerformRequest
+            }
             authState?.update(response, exception)
             exception?.let {
                 Logger.error("performTokenRequest=$it", config.debuggable)
@@ -494,8 +513,21 @@ class BNAppAuthImpl : BNAppAuth {
         val nonNullState = state ?: return
         this.authState = nonNullState
         currentIdToken = nonNullState.idToken
-        authPrefs?.edit(commit = true) { putString(SHARED_PREFS_KEY, nonNullState.jsonSerializeString()) }
+        authPrefs?.edit(commit = true) {
+            putString(
+                SHARED_PREFS_KEY,
+                nonNullState.jsonSerializeString()
+            )
+        }
     }
+
+    fun getLifecycleAbortException() = BnAppAuthException(
+        code = LIFECYCLE_ABORT_CODE,
+        errorDescription = "Lifecycle Abort",
+        error = null,
+        errorUri = null,
+        rootCause = Exception()
+    )
 
     @VisibleForTesting
     override fun clearState() {
