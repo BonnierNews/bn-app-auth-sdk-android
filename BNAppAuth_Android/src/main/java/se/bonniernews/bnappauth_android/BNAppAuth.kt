@@ -272,6 +272,7 @@ class BNAppAuthImpl : BNAppAuth {
 
                 authState?.needsTokenRefresh = forceRefresh || getLoginToken
                 val refreshParams = mapOf("issue_login_token" to (getLoginToken).toString())
+                if (forceRefresh) refreshParams.plus("bypass_cache" to "true")
 
                 authState?.performActionWithFreshTokens(
                     service, refreshParams,
