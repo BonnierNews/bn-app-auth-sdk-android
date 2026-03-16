@@ -926,6 +926,59 @@ class BNAppAuthTest {
         verify(authState, never()).performActionWithFreshTokens(any(), any<Map<String, String>>(), any())
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `getIdToken with forceRefresh=true passes bypass_cache to performActionWithFreshTokens`() = runTest {
+        // Given
+        val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", this)
+        mockProperty(appAuth, "isMigrationDone", true)
+        appAuth.authState = authState
+
+        doNothing().whenever(appAuth).writeAuthState(any())
+        whenever(authState.isAuthorized).thenReturn(true)
+
+        var capturedParams: Map<String, String>? = null
+        whenever(authState.performActionWithFreshTokens(any(), any<Map<String, String>>(), any())).thenAnswer { args ->
+            capturedParams = args.getArgument<Map<String, String>>(1)
+            (args.arguments[2] as? AuthStateAction)?.execute("accessToken", "idToken", null)
+        }
+
+        // When
+        appAuth.getIdToken(forceRefresh = true) { _, _ -> }
+        advanceUntilIdle()
+
+        // Then
+        assertEquals("true", capturedParams?.get("bypass_cache"))
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `getIdToken with forceRefresh=false does not pass bypass_cache to performActionWithFreshTokens`() = runTest {
+        // Given
+        val appAuth = spy(bnAppAuth)
+        mockProperty(appAuth, "scope", this)
+        mockProperty(appAuth, "isMigrationDone", true)
+        appAuth.authState = authState
+
+        doNothing().whenever(appAuth).writeAuthState(any())
+        whenever(authState.isAuthorized).thenReturn(true)
+        whenever(authState.needsTokenRefresh).thenReturn(true) // force refresh path without forceRefresh flag
+
+        var capturedParams: Map<String, String>? = null
+        whenever(authState.performActionWithFreshTokens(any(), any<Map<String, String>>(), any())).thenAnswer { args ->
+            capturedParams = args.getArgument<Map<String, String>>(1)
+            (args.arguments[2] as? AuthStateAction)?.execute("accessToken", "idToken", null)
+        }
+
+        // When
+        appAuth.getIdToken(forceRefresh = false, getLoginToken = true) { _, _ -> }
+        advanceUntilIdle()
+
+        // Then
+        assertFalse(capturedParams?.containsKey("bypass_cache") ?: false)
+    }
+
     fun mockProperty(obj: Any, propertyName: String, value: Any) {
         val field = obj.javaClass.getDeclaredField(propertyName)
         field.isAccessible = true

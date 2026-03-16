@@ -21,6 +21,7 @@ import kotlinx.coroutines.sync.Mutex
 import androidx.core.content.edit
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancelChildren
+import kotlin.toString
 
 interface BNAppAuth {
     val isAuthorized: Boolean
@@ -271,8 +272,10 @@ class BNAppAuthImpl : BNAppAuth {
                 val refreshJob = CompletableDeferred<Unit>()
 
                 authState?.needsTokenRefresh = forceRefresh || getLoginToken
-                val refreshParams = mapOf("issue_login_token" to (getLoginToken).toString())
-                if (forceRefresh) refreshParams.plus("bypass_cache" to "true")
+                val refreshParams = buildMap {
+                    put("issue_login_token", getLoginToken.toString())
+                    if (forceRefresh) put("bypass_cache", "true")
+                }
 
                 authState?.performActionWithFreshTokens(
                     service, refreshParams,
