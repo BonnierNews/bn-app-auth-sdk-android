@@ -11,7 +11,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import net.openid.appauth.*
-import net.openid.appauth.AuthorizationException.AuthorizationRequestErrors.OTHER
 import net.openid.appauth.AuthorizationRequest.Prompt.CONSENT
 import net.openid.appauth.AuthorizationRequest.Prompt.SELECT_ACCOUNT
 import net.openid.appauth.AuthorizationRequest.Scope
@@ -86,6 +85,7 @@ class BNAppAuthImpl : BNAppAuth {
         const val MIGRATION_PREFS_NAME = "bn_migration_prefs"
         const val MIGRATION_PREFS_KEY = "bn_migration_completed"
         const val LIFECYCLE_ABORT_CODE = -999
+        const val GENERIC_ERROR = 1008
     }
 
     @VisibleForTesting
@@ -149,7 +149,7 @@ class BNAppAuthImpl : BNAppAuth {
 
         authServiceSdk.fetchFromIssuer(config) { serviceConfiguration, ex ->
             if (authService == null) {
-                callback(null, getLifecycleAbortException())
+                callback(null, getGenericException())
                 return@fetchFromIssuer
             }
             ex?.let {
@@ -159,7 +159,7 @@ class BNAppAuthImpl : BNAppAuth {
             }
             val configuration = serviceConfiguration ?: run {
                 Logger.error("login no serviceConfiguration", config.debuggable)
-                callback(null, BnAppAuthException.convert(OTHER))
+                callback(null, getGenericException(GENERIC_ERROR))
                 return@fetchFromIssuer
             }
             val authorizationRequest =
@@ -232,7 +232,7 @@ class BNAppAuthImpl : BNAppAuth {
                         "performActionWithFreshTokens authService is null",
                         config.debuggable
                     )
-                    callback(null, getLifecycleAbortException())
+                    callback(null, getGenericException())
                     return@withLock
                 }
 
@@ -245,7 +245,7 @@ class BNAppAuthImpl : BNAppAuth {
                     val success = performSilentExchange(idToken)
                     if (!success) {
                         clearState()
-                        callback(null, BnAppAuthException.convert(OTHER))
+                        callback(null, getGenericException(GENERIC_ERROR))
                         return@withLock
                     }
                 }
@@ -283,7 +283,7 @@ class BNAppAuthImpl : BNAppAuth {
                         try {
                             if (authService == null) {
                                 refreshJob.complete(Unit)
-                                callback(null, getLifecycleAbortException())
+                                callback(null, getGenericException())
                                 return@AuthStateAction
                             }
 
@@ -350,11 +350,11 @@ class BNAppAuthImpl : BNAppAuth {
     ) {
         authServiceSdk.fetchFromIssuer(config) { serviceConfiguration, ex ->
             if (authService == null) {
-                callback(null, getLifecycleAbortException())
+                callback(null, getGenericException())
                 return@fetchFromIssuer
             }
             if (ex != null || serviceConfiguration == null) {
-                callback(null, BnAppAuthException.convert(ex ?: OTHER))
+                callback(null, getGenericException(GENERIC_ERROR))
                 return@fetchFromIssuer
             }
 
@@ -420,7 +420,7 @@ class BNAppAuthImpl : BNAppAuth {
     ) {
         authService?.performTokenRequest(request) PerformRequest@{ response, exception ->
             if (authService == null) {
-                callback(null, getLifecycleAbortException())
+                callback(null, getGenericException())
                 return@PerformRequest
             }
             authState?.update(response, exception)
@@ -456,7 +456,7 @@ class BNAppAuthImpl : BNAppAuth {
                 }
             } ?: run {
                 Logger.error("continueAuthorization=resp is null", config.debuggable)
-                callback(null, BnAppAuthException.convert(OTHER))
+                callback(null, getGenericException(GENERIC_ERROR))
             }
         } else {
             clearState()
@@ -525,8 +525,8 @@ class BNAppAuthImpl : BNAppAuth {
         }
     }
 
-    fun getLifecycleAbortException() = BnAppAuthException(
-        code = LIFECYCLE_ABORT_CODE,
+    fun getGenericException(code: Int? = null) = BnAppAuthException(
+        code = code ?: LIFECYCLE_ABORT_CODE,
         errorDescription = "Lifecycle Abort",
         error = null,
         errorUri = null,
