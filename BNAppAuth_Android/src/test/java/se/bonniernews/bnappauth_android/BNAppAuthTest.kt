@@ -291,6 +291,51 @@ class BNAppAuthTest {
     }
 
     @Test
+    fun `consent is passed to authorizationRequest`() {
+        // Given
+        val consent = "consent-string"
+        val appAuth = spy(bnAppAuth)
+        val intent = fakeIntent(config.loginRedirectURL.toString())
+        doNothing().whenever(appAuth).writeAuthState(any())
+        whenever(authService.getAuthorizationRequestIntent(any())).thenReturn(intent)
+        whenever(authServiceSdk.fetchFromIssuer(any(), any())).thenAnswer { args ->
+            args.getArgument<(AuthorizationServiceConfiguration?, Exception?) -> Unit>(1)
+                .invoke(authorizationServiceConfiguration, null)
+        }
+
+        // When
+        var loginIntentTest: Intent? = null
+        appAuth.createAccount(consent = consent) { loginIntent, _ ->
+            loginIntentTest = loginIntent
+        }
+
+        // Then
+        assertEquals(loginIntentTest, intent)
+        verify(appAuth).writeAuthState(any())
+        verify(appAuth).authorizationRequest(authorizationServiceConfiguration, null, "create-user", null, consent)
+        verify(authService).getAuthorizationRequestIntent(any())
+    }
+
+    @Test
+    fun `authorizationRequest is adding consent as additionalParameter`() {
+        // Given
+        val consent = "consent-string"
+        val appAuth = spy(bnAppAuth)
+
+        // When
+        val builder = appAuth.authorizationRequest(
+            authorizationServiceConfiguration,
+            null,
+            "create-user",
+            null,
+            consent
+        )
+
+        // Then
+        assertEquals(builder.additionalParameters["consent"], consent)
+    }
+
+    @Test
     fun `logout returns logout intent`() {
         // Given
         val intent = fakeIntent(config.logoutRedirectUrl.toString())
