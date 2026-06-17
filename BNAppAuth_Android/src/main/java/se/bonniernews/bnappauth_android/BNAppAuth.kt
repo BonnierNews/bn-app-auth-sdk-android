@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import net.openid.appauth.*
+import java.net.HttpURLConnection
 import net.openid.appauth.AuthorizationRequest.Prompt.CONSENT
 import net.openid.appauth.AuthorizationRequest.Prompt.SELECT_ACCOUNT
 import net.openid.appauth.AuthorizationRequest.Scope
@@ -20,6 +21,7 @@ import kotlinx.coroutines.sync.Mutex
 import androidx.core.content.edit
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancelChildren
+import java.net.URL
 import kotlin.toString
 
 interface BNAppAuth {
@@ -130,7 +132,15 @@ class BNAppAuthImpl : BNAppAuth {
         this.config = config
         authPrefs = context.getSharedPreferences(SHARED_PREFS_NAME, MODE_PRIVATE)
         migrationPrefs = context.getSharedPreferences(MIGRATION_PREFS_NAME, MODE_PRIVATE)
-        authService = AuthorizationService(context)
+        val appAuthConfig = AppAuthConfiguration.Builder()
+            .setConnectionBuilder { uri ->
+                (URL(uri.toString()).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 5_000
+                    readTimeout = 5_000
+                }
+            }
+            .build()
+        authService = AuthorizationService(context, appAuthConfig)
         authState = readAuthState()
     }
 
