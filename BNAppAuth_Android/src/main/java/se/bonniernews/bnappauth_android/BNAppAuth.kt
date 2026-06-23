@@ -30,14 +30,14 @@ interface BNAppAuth {
         loginToken: String? = null,
         action: String? = null,
         locale: String? = null,
-        consent: String? = null,
+        consentId: String? = null,
         callback: (intent: Intent?, exception: BnAppAuthException?) -> Unit
     )
 
     fun logout(): Intent?
     fun createAccount(
         locale: String? = null,
-        consent: String? = null,
+        consentId: String? = null,
         callback: (intent: Intent?, exception: BnAppAuthException?) -> Unit
     )
 
@@ -138,7 +138,7 @@ class BNAppAuthImpl : BNAppAuth {
         loginToken: String?,
         action: String?,
         locale: String?,
-        consent: String?,
+        consentId: String?,
         callback: (intent: Intent?, exception: BnAppAuthException?) -> Unit
     ) {
         if (!::config.isInitialized) {
@@ -166,7 +166,7 @@ class BNAppAuthImpl : BNAppAuth {
                 return@fetchFromIssuer
             }
             val authorizationRequest =
-                authorizationRequest(configuration, loginToken, action, locale, consent)
+                authorizationRequest(configuration, loginToken, action, locale, consentId)
             val requestIntent = try {
                 authService?.getAuthorizationRequestIntent(authorizationRequest)
             } catch (e: Exception) {
@@ -186,10 +186,10 @@ class BNAppAuthImpl : BNAppAuth {
 
     override fun createAccount(
         locale: String?,
-        consent: String?,
+        consentId: String?,
         callback: (intent: Intent?, exception: BnAppAuthException?) -> Unit
     ) {
-        login(action = "create-user", locale = locale, consent = consent) { intent, ex ->
+        login(action = "create-user", locale = locale, consentId = consentId) { intent, ex ->
             ex?.let {
                 Logger.error("createAccount=$it", config.debuggable)
                 callback(null, it)
@@ -477,7 +477,7 @@ class BNAppAuthImpl : BNAppAuth {
         loginToken: String? = null,
         action: String? = null,
         locale: String? = null,
-        consent: String? = null,
+        consentId: String? = null,
     ): AuthorizationRequest {
         val builder = AuthorizationRequest.Builder(
             serviceConfig,
@@ -499,7 +499,7 @@ class BNAppAuthImpl : BNAppAuth {
         val additionalParams = mutableMapOf<String, String?>().apply {
             loginToken?.let { put("token", it) }
             action?.let { put("action", it) }
-            consent?.let { put("consent", it) }
+            consentId?.let { put("consent_id", it) }
         }
 
         builder.setAdditionalParameters(additionalParams)

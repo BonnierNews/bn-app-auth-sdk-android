@@ -291,9 +291,9 @@ class BNAppAuthTest {
     }
 
     @Test
-    fun `consent is passed to authorizationRequest`() {
+    fun `consentId is passed to authorizationRequest`() {
         // Given
-        val consent = "consent-string"
+        val consentId = "consent-id-string"
         val appAuth = spy(bnAppAuth)
         val intent = fakeIntent(config.loginRedirectURL.toString())
         doNothing().whenever(appAuth).writeAuthState(any())
@@ -305,21 +305,21 @@ class BNAppAuthTest {
 
         // When
         var loginIntentTest: Intent? = null
-        appAuth.createAccount(consent = consent) { loginIntent, _ ->
+        appAuth.createAccount(consentId = consentId) { loginIntent, _ ->
             loginIntentTest = loginIntent
         }
 
         // Then
         assertEquals(loginIntentTest, intent)
         verify(appAuth).writeAuthState(any())
-        verify(appAuth).authorizationRequest(authorizationServiceConfiguration, null, "create-user", null, consent)
+        verify(appAuth).authorizationRequest(authorizationServiceConfiguration, null, "create-user", null, consentId)
         verify(authService).getAuthorizationRequestIntent(any())
     }
 
     @Test
-    fun `authorizationRequest is adding consent as additionalParameter`() {
+    fun `authorizationRequest is adding consentId as additionalParameter`() {
         // Given
-        val consent = "consent-string"
+        val consentId = "consent-id-string"
         val appAuth = spy(bnAppAuth)
 
         // When
@@ -328,11 +328,11 @@ class BNAppAuthTest {
             null,
             "create-user",
             null,
-            consent
+            consentId
         )
 
         // Then
-        assertEquals(builder.additionalParameters["consent"], consent)
+        assertEquals(builder.additionalParameters["consent_id"], consentId)
     }
 
     @Test
