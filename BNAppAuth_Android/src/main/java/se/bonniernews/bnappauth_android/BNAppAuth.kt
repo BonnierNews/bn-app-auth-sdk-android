@@ -270,7 +270,7 @@ class BNAppAuthImpl : BNAppAuth {
                         BNAppAuth.TokenResponse(
                             authState?.idToken,
                             params?.get("old_bnidtoken"),
-                            params?.get("login_token"),
+                            null, // getLoginToken is false in this branch; never echo back a cached login_token
                             false
                         ), null
                     )
@@ -313,7 +313,7 @@ class BNAppAuthImpl : BNAppAuth {
                             val params = getAdditionalParameters(authState?.lastTokenResponse)
                             if (params != null) {
                                 bnIdToken = params["old_bnidtoken"]
-                                bnLoginToken = params["login_token"]
+                                bnLoginToken = if (getLoginToken) params["login_token"] else null
                             }
 
                             val isUpdated = token != currentIdToken
