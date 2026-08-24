@@ -964,7 +964,7 @@ class BNAppAuthTest {
 
         // Then
         assertEquals("cached_id_token", result?.idToken)
-        assertEquals("cached_login_token", result?.loginToken)
+        assertNull(result?.loginToken)
         assertEquals(false, result?.isUpdated)
 
         // Verify that we NEVER reached the refresh logic
