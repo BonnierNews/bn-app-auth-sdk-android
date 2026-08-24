@@ -270,7 +270,7 @@ class BNAppAuthImpl : BNAppAuth {
                         BNAppAuth.TokenResponse(
                             authState?.idToken,
                             params?.get("old_bnidtoken"),
-                            null, // getLoginToken is false in this branch; never echo back a cached login_token
+                            null,
                             false
                         ), null
                     )

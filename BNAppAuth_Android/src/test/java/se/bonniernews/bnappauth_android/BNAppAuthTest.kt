@@ -964,7 +964,6 @@ class BNAppAuthTest {
 
         // Then
         assertEquals("cached_id_token", result?.idToken)
-        // getLoginToken was false for this call, so a stale/cached login_token must never be echoed back.
         assertNull(result?.loginToken)
         assertEquals(false, result?.isUpdated)
 
