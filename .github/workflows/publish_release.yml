@@ -32,3 +32,15 @@ jobs:
 
       - name: Run publish
         run: ./gradlew BNAppAuth_Android:publish
+
+      - name: Report release to DORA
+        if: success()
+        run: |
+          commit_sha=$(git rev-parse HEAD)
+          dora_json=$(jq -c -n --arg commit_sha "$commit_sha" \
+            '{ "service":"bn-app-auth-sdk-android", "team":"exp-app", "gitHash":$commit_sha, "environment":"prod", "platform":"android", "gitOrg":"bonniernews", "gitRepo":"bn-app-auth-sdk-android" }')
+          curl --request POST --max-time 10 --silent --show-error --fail --output /dev/null \
+            --header 'Content-Type: application/json' \
+            --data "$dora_json" \
+            https://europe-west1-developer-kpis-prod-0u49.cloudfunctions.net/deploy-recorder \
+            || echo "Warning: failed to report release to DORA"
