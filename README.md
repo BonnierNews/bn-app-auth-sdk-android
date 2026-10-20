@@ -208,7 +208,7 @@ The `app` module is a Compose app for trying the SDK by hand:
 4. **Get Login Token**: calls `getIdToken(getLoginToken = true)`.
 5. **Transfer Token (resource / audience)**: calls `getTransferToken(resource)` or `getTransferToken(audience)` and shows the token, "No token" or the error.
 
-`AuthApplication` holds dummy values for the client configuration and for the site and client id the transfer token buttons use, and `app/build.gradle.kts` holds the redirect scheme. Fill in real ones to run the app, but don't commit them.
+The client configuration and the site and client id the transfer token buttons use come from `.env.properties` in the project root, and fall back to dummy values without it. To run the app against a real environment, copy `.env.properties.sample` to `.env.properties` and fill in your values. The file is git-ignored, so it never gets committed. The redirect scheme is taken from `EXAMPLE_LOGIN_REDIRECT_URL`.
 
 ## License
 
