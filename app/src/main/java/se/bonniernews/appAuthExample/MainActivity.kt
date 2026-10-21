@@ -45,6 +45,7 @@ import se.bonniernews.appAuthExample.ui.theme.Black
 import se.bonniernews.appAuthExample.ui.theme.Gray
 import se.bonniernews.appAuthExample.ui.theme.White
 import se.bonniernews.bnappauth_android.BNAppAuth
+import se.bonniernews.bnappauth_android.BnAppAuthException
 import kotlin.coroutines.resume
 
 
@@ -158,6 +159,28 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             )
+                            AuthButton(
+                                "Transfer Token (resource)",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp, 16.dp, 32.dp, 0.dp),
+                                onClick = {
+                                    showTransferToken("transferToken (resource)") {
+                                        appAuth.getTransferToken(authApplication.transferTokenResource)
+                                    }
+                                }
+                            )
+                            AuthButton(
+                                "Transfer Token (audience)",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp, 16.dp, 32.dp, 0.dp),
+                                onClick = {
+                                    showTransferToken("transferToken (audience)") {
+                                        appAuth.getTransferToken(authApplication.transferTokenAudience)
+                                    }
+                                }
+                            )
                             AuthClickableText(
                                 buildAnnotatedString {
                                     withStyle(style = SpanStyle(fontWeight = Bold)) {
@@ -183,6 +206,19 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    private val authApplication get() = application as AuthApplication
+
+    private fun showTransferToken(headline: String, transferToken: suspend () -> String?) {
+        CoroutineScope(Dispatchers.Main).launch {
+            val text = try {
+                transferToken() ?: "No token"
+            } catch (e: BnAppAuthException) {
+                "Error: ${e.error} ${e.errorDescription}"
+            }
+            buildLayout(text, headline)
         }
     }
 

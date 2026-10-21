@@ -1,8 +1,20 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// The example app's client and test values come from the git-ignored .env.properties
+// (copy .env.properties.sample), and fall back to dummy values without it.
+val envProperties = Properties().apply {
+    rootProject.file(".env.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+
+fun envValue(name: String, dummy: String): String = envProperties.getProperty(name) ?: dummy
+
+val loginRedirectUrl = envValue("EXAMPLE_LOGIN_REDIRECT_URL", "custom.redirect.scheme://www.test.se/login")
 
 android {
     namespace = "se.bonniernews.appAuthExample"
@@ -20,7 +32,25 @@ android {
             useSupportLibrary = true
         }
 
-        manifestPlaceholders["appAuthRedirectScheme"] = "custom.redirect.scheme"
+        manifestPlaceholders["appAuthRedirectScheme"] = loginRedirectUrl.substringBefore("://")
+        buildConfigField("String", "EXAMPLE_ISSUER", "\"${envValue("EXAMPLE_ISSUER", "https://oidc-provider.com/")}\"")
+        buildConfigField("String", "EXAMPLE_CLIENT_ID", "\"${envValue("EXAMPLE_CLIENT_ID", "client-id")}\"")
+        buildConfigField("String", "EXAMPLE_LOGIN_REDIRECT_URL", "\"$loginRedirectUrl\"")
+        buildConfigField(
+            "String",
+            "EXAMPLE_LOGOUT_REDIRECT_URL",
+            "\"${envValue("EXAMPLE_LOGOUT_REDIRECT_URL", "custom.redirect.scheme://www.test.se/logout")}\""
+        )
+        buildConfigField(
+            "String",
+            "EXAMPLE_TRANSFER_TOKEN_RESOURCE",
+            "\"${envValue("EXAMPLE_TRANSFER_TOKEN_RESOURCE", "https://www.example.com/")}\""
+        )
+        buildConfigField(
+            "String",
+            "EXAMPLE_TRANSFER_TOKEN_AUDIENCE",
+            "\"${envValue("EXAMPLE_TRANSFER_TOKEN_AUDIENCE", "site-client-id")}\""
+        )
     }
 
     buildTypes {
@@ -42,6 +72,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {

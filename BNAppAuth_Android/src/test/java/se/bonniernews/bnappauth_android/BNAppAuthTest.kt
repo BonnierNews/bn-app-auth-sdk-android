@@ -19,6 +19,7 @@ import net.openid.appauth.AuthorizationException
 import net.openid.appauth.AuthorizationResponse
 import net.openid.appauth.AuthorizationService
 import net.openid.appauth.AuthorizationServiceConfiguration
+import net.openid.appauth.ClientAuthentication
 import net.openid.appauth.TokenRequest
 import net.openid.appauth.TokenResponse
 import kotlinx.coroutines.test.runTest
@@ -1109,6 +1110,71 @@ class BNAppAuthTest {
         // Then
         assertNotNull(exceptionTest)
         assertEquals(BNAppAuthImpl.LIFECYCLE_ABORT_CODE, exceptionTest?.code)
+    }
+
+    // --- Transfer tokens (the exchange logic itself is covered by TransferTokenExchangeTest) ---
+
+    private val transferServiceConfiguration = AuthorizationServiceConfiguration(
+        Uri.parse("https://test.se/oauth/authorize"),
+        Uri.parse("https://test.se/oauth/token")
+    )
+
+    private val siteUrl = Uri.parse("https://www.site.se/sport/?a=1")
+
+    private fun logIn() {
+        bnAppAuth.authState = authState
+        whenever(authState.isAuthorized).thenReturn(true)
+        whenever(authState.authorizationServiceConfiguration).thenReturn(transferServiceConfiguration)
+        whenever(authState.jsonSerializeString()).thenReturn("{}")
+        whenever(authState.performActionWithFreshTokens(any(), any<Map<String, String>>(), any())).thenAnswer { args ->
+            (args.arguments[2] as AuthStateAction).execute("accessToken", "idToken", null)
+        }
+    }
+
+    private fun respondToTransferTokenRequest(): MutableList<TokenRequest> {
+        val requests = mutableListOf<TokenRequest>()
+        whenever(authService.performTokenRequest(any(), any<ClientAuthentication>(), any())).thenAnswer { args ->
+            val request = args.getArgument<TokenRequest>(0)
+            requests.add(request)
+            val response = TokenResponse.Builder(request).setAccessToken("transferToken").build()
+            args.getArgument<AuthorizationService.TokenResponseCallback>(2).onTokenRequestCompleted(response, null)
+        }
+        return requests
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `getTransferToken exchanges a fresh access token at the session's token endpoint`() = runTest {
+        logIn()
+        val requests = respondToTransferTokenRequest()
+
+        val token = bnAppAuth.getTransferToken(siteUrl)
+
+        assertEquals("transferToken", token)
+        val request = requests.single()
+        assertEquals(Uri.parse("https://test.se/oauth/token"), request.configuration.tokenEndpoint)
+        assertEquals("app", request.clientId)
+        assertEquals("accessToken", request.additionalParameters["subject_token"])
+        assertEquals(siteUrl.toString(), request.additionalParameters["resource"])
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `getTransferToken never replaces the user's own tokens`() = runTest {
+        logIn()
+        respondToTransferTokenRequest()
+
+        bnAppAuth.getTransferToken("site-web")
+
+        verify(authState, never()).update(any<TokenResponse>(), anyOrNull())
+        verify(authService, never()).performTokenRequest(any(), any<AuthorizationService.TokenResponseCallback>())
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `getTransferToken returns null without a request when logged out`() = runTest {
+        assertNull(bnAppAuth.getTransferToken(siteUrl))
+        verify(authService, never()).performTokenRequest(any(), any<ClientAuthentication>(), any())
     }
 }
 

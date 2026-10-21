@@ -1,123 +1,217 @@
-# BNAppAuth SDK
+# BNAppAuth for Android
 
-BNAppAuth is an Android library for handling authentication using the AppAuth library. It provides a simple interface for logging in, logging out, and managing authentication tokens.
+BNAppAuth is the Bonnier News login SDK for Android. It wraps [AppAuth-Android](https://github.com/openid/AppAuth-Android) and gives the apps one place for everything that talks to id-service: logging in and out, creating accounts, keeping tokens fresh, and handing out transfer tokens that log the user in on other sites.
 
-## Features
-- **Login**: Allows users to authenticate.
-- **Account Creation**: Facilitates user registration.
-- **Logout**: Log users out.
-- **Token Management**: Retrieve and refresh ID tokens.
-- **State Management**: Stores and clears authentication state securely.
+- [Installation](#installation)
+- [Getting started](#getting-started)
+- [Configuration](#configuration)
+- [Logging in and out](#logging-in-and-out)
+- [ID tokens](#id-tokens)
+- [Transfer tokens](#transfer-tokens)
+- [Authentication state](#authentication-state)
+- [Migrating from /oidc to /oauth](#migrating-from-oidc-to-oauth)
+- [Errors](#errors)
+- [Example app](#example-app)
+- [License](#license)
 
-## Setup
+## Installation
 
-### Dependencies
-Make sure to include the necessary dependencies in your `build.gradle` file:
+The library can be installed from GitHub Packages or from JitPack.
 
-```
-repositories {
-    mavenCentral()
-    maven { url = uri("https://jitpack.io") }
+### GitHub Packages
+
+The library is published as `com.github.BonnierNews:bn-app-auth-sdk-aar`. Add the repository, with a GitHub user and a token that can read packages:
+
+```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement {
+    repositories {
+        maven {
+            url = uri("https://maven.pkg.github.com/BonnierNews/bn-app-auth-sdk-android")
+            credentials {
+                username = providers.gradleProperty("gpr.usr").get()
+                password = providers.gradleProperty("gpr.key").get()
+            }
+        }
+    }
 }
+```
 
+```kotlin
+// build.gradle.kts
 dependencies {
-    implementation("com.github.BonnierNews:bn-app-auth-sdk-android:Tag")
+    implementation("com.github.BonnierNews:bn-app-auth-sdk-aar:<version>")
 }
 ```
 
-## Initialization
-To use the SDK, you need to first configure it.
+### JitPack
+
+JitPack builds the library from a release tag and needs no credentials:
+
+```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+        maven { url = uri("https://jitpack.io") }
+    }
+}
 ```
-val clientConfig = BNAppAuth.ClientConfiguration(
-    issuer = Uri.parse("https://your-issuer.com"),
+
+```kotlin
+// build.gradle.kts
+dependencies {
+    implementation("com.github.BonnierNews:bn-app-auth-sdk-android:<tag>")
+}
+```
+
+## Getting started
+
+Configure the SDK once, for example in your `Application`:
+
+```kotlin
+val config = BNAppAuth.ClientConfiguration(
+    issuer = Uri.parse("https://id.bonniernews.se/oauth"),
     clientId = "your-client-id",
-    clientSecret = "your-client-secret", // Optional
-    loginRedirectURL = Uri.parse("your-login-redirect-url"),
-    logoutRedirectUrl = Uri.parse("your-logout-redirect-url"),
-    customScopes = listOf("custom-scope"), // Optional
-    debuggable = true // Enable for debugging
+    loginRedirectURL = Uri.parse("your-app://login-callback"),
+    logoutRedirectUrl = Uri.parse("your-app://logout-callback")
 )
 
-BNAppAuth.instance.configure(context, clientConfig)
+BNAppAuth.instance.configure(context, config)
 ```
 
-## Methods
+Login and logout hand you an `Intent` to start. Start it with an activity result launcher and pass the result back to the SDK:
 
-```
-configure(context: Context, config: ClientConfiguration)
-```
-Configures the SDK with the context and the necessary client configuration.
+```kotlin
+private val loginLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+    result.data?.let { data ->
+        BNAppAuth.instance.continueAuthorization(data) { idToken, exception ->
+            // Logged in when idToken is set.
+        }
+    }
+}
 
-#### Parameters:
-- `context`: The application context.
-- `config`: The client configuration.
-
+BNAppAuth.instance.login { intent, exception ->
+    intent?.let { loginLauncher.launch(it) }
+}
 ```
-login(loginToken: String? = null, action: String? = null, callback: (intent: Intent?, exception: BnAppAuthException?) -> Unit)
-```
-Starts the login flow by redirecting the user to the authentication provider.
 
-#### Parameters:
-- `loginToken` (Optional): A token to pass during login.
-- `action` (Optional): An action to pass (e.g., "create-user" for account creation).
-- `callback`: A callback function to receive the result, which provides an intent for redirection or an exception.
+## Configuration
 
-```
-logout(): Intent?
-```
-Logs the user out by generating the logout request intent.
+`BNAppAuth.ClientConfiguration` takes the following arguments:
 
-#### Returns:
-- `Intent?`: The intent that can be used to redirect the user to the logout page, or `null` if the SDK is not configured.
+| Argument | Default | Description |
+|---|---|---|
+| `issuer` | – | The id-service issuer URL. |
+| `clientId` | – | The app's OAuth client id. |
+| `clientSecret` | `null` | The client secret, for clients that have one. |
+| `loginRedirectURL` | – | Where id-service sends the user after logging in. |
+| `logoutRedirectUrl` | – | Where id-service sends the user after logging out. |
+| `prompt` | `"select_account consent"` | The `prompt` sent with the login request. |
+| `customScopes` | `null` | Extra scopes besides `openid`. Add `old_bnidtoken` to also get the legacy `bnIdToken`. |
+| `debuggable` | `false` | Logs the SDK's activity, including the tokens themselves. Never enable it in release builds. |
+| `useMigration` | `false` | Moves logged-in users from the old `/oidc` issuer to `/oauth`. See [Migrating from /oidc to /oauth](#migrating-from-oidc-to-oauth). |
 
-```
-createAccount(callback: (intent: Intent?, exception: BnAppAuthException?) -> Unit)
-```
-Initiates the account creation flow.
+All requests to id-service time out after 5 seconds. Call `configure` before any other method.
 
-#### Parameters:
-- `callback`: A callback function to receive the result, which provides an intent for redirection or an exception.
+## Logging in and out
 
-```
-getIdToken(forceRefresh: Boolean = false, callback: (tokenResponse: TokenResponse?, exception: BnAppAuthException?) -> Unit)
-```
-Retrieves the ID token, optionally forcing a refresh.
+| Method | Description |
+|---|---|
+| `login(loginToken, action, locale, consentId, callback)` | Prepares the login flow and calls back with the `Intent` to start. All arguments except `callback` are optional: `loginToken` logs the user in with a login token, `action` is passed to id-service (for example `create-user`), `locale` sets the language of the login page, and `consentId` passes on the user's consent. |
+| `createAccount(locale, consentId, callback)` | Like `login`, but opens the create account page. |
+| `logout(): Intent?` | Returns the `Intent` that ends the session at id-service, or `null` when there is no session to end. |
+| `continueAuthorization(intent, callback)` | Finishes the flow with the result `Intent`. After a login it calls back with the ID token. After a logout it clears the stored state and calls back with `null`. |
 
-#### Parameters:
-- `forceRefresh` (Optional): If `true`, forces the token to refresh even if it's not expired.
-- `callback`: A callback function to return the token response or an exception.
+## ID tokens
 
-#### Returns:
-- `TokenResponse?`: The response containing the ID token, or `null` if an error occurred.
+```kotlin
+BNAppAuth.instance.getIdToken { tokenResponse, exception ->
+    // tokenResponse is null when the user is logged out or the request failed
+}
+```
 
-```
-continueAuthorization(intent: Intent, callback: (idToken: String?, exception: BnAppAuthException?) -> Unit)
-```
-Continues the authorization flow after a redirect.
+`getIdToken(forceRefresh, getLoginToken, callback)` calls back on the main thread with the current ID token, refreshing the tokens first when needed. While the tokens are valid for more than another minute, it answers without a network call.
 
-#### Parameters:
-- `intent`: The intent containing the authorization response from the external provider.
-- `callback`: A callback function to return the ID token or an exception.
+- `forceRefresh = true` always refreshes and asks id-service to bypass its cache.
+- `getLoginToken = true` refreshes and also returns a login token in `loginToken`.
 
-```
-clearState()
-```
-Clears the authentication state, effectively logging the user out.
+`BNAppAuth.TokenResponse` contains:
 
-```
-releaseResources()
-```
-Releases any resources used by the SDK.
+| Property | Description |
+|---|---|
+| `idToken` | The ID token. |
+| `bnIdToken` | The legacy token, when `customScopes` contains `old_bnidtoken`. |
+| `loginToken` | A login token, when asked for with `getLoginToken`. |
+| `isUpdated` | `true` when the ID token changed since the last call. |
 
-## Exampleapp
-The exampleapp in the main module is a sample application demonstrating how to use the BNAppAuth library for authentication in an Android project. It includes examples of configuring the library, initiating login and logout processes, and handling authentication tokens.
-1. Configuration: Setting up the BNAppAuth instance with the necessary client configuration.
-2. Login: Initiating the login process and handling the result.
-3. Logout: Initiating the logout process.
-4. Token Management: Retrieving and refreshing ID tokens.
-5. State Management: Storing and clearing authentication state.
+## Transfer tokens
+
+A transfer token is a short-lived token that logs the user in on another site in the same session as the app. The SDK exchanges the user's access token for one at id-service. It never changes the user's own tokens.
+
+There is one suspend function for each kind of target:
+
+```kotlin
+// Web views: the id-service client id of the site.
+val token = BNAppAuth.instance.getTransferToken(audience = "site-client-id")
+
+// External browsers: the URL that is about to open.
+val url = BNAppAuth.instance.getTransferToken(resource = siteUrl)
+    ?.let { siteUrl.buildUpon().appendQueryParameter(BNAppAuthImpl.TRANSFER_TOKEN_PARAMETER, it).build() }
+    ?: siteUrl
+```
+
+Add the token to the URL as `BNAppAuthImpl.TRANSFER_TOKEN_PARAMETER` (`idtransfertoken`). The site exchanges it for its own login.
+
+- **A null token** means there is no token to add right now. Open the URL as it is. That happens when:
+  - the user is logged out,
+  - id-service has no client for the audience or site (it answers `invalid_target`, and the SDK then skips that audience or site for 24 hours), or
+  - id-service didn't answer within 2 seconds.
+- **A `BnAppAuthException`** means the exchange failed. Open the URL as it is. The next call tries again.
+- **Only https URLs** get a token, since the token ends up in the URL the browser opens.
+
+The functions switch to the main thread themselves, so they can be called from any coroutine. Cancelling the caller's scope cancels the exchange.
+
+## Authentication state
+
+| Member | Description |
+|---|---|
+| `isAuthorized` | Whether the user is logged in. |
+| `clearState()` | Removes the stored state, which logs the user out locally without contacting id-service. |
+| `releaseResources()` | Cancels the SDK's ongoing work and releases AppAuth's resources. Call `configure` again before using the SDK afterwards. |
+
+The state is stored in the app's `SharedPreferences`.
+
+## Migrating from /oidc to /oauth
+
+With `useMigration = true`, the first `getIdToken` call after an update exchanges the token from the old `/oidc` issuer for new `/oauth` tokens. It only runs once. If the exchange fails, the user is logged out.
+
+## Errors
+
+Failures are reported as `BnAppAuthException`:
+
+| Property | Description |
+|---|---|
+| `code` | AppAuth's error code, or `BNAppAuthImpl.LIFECYCLE_ABORT_CODE` (`-999`) when `releaseResources()` was called during the request. |
+| `error` | The OAuth error, for example `invalid_grant`. |
+| `errorDescription` | A description of the error, when there is one. |
+| `errorUri` | A link with more information, when there is one. |
+| `rootCause` | The underlying exception. |
+
+## Example app
+
+The `app` module is a Compose app for trying the SDK by hand:
+
+1. **Configuration**: sets up `BNAppAuth` with a client configuration.
+2. **Logga in / Logga ut**: starts the login and logout flows and shows the result.
+3. **Force refresh**: calls `getIdToken(forceRefresh = true)`.
+4. **Get Login Token**: calls `getIdToken(getLoginToken = true)`.
+5. **Transfer Token (resource / audience)**: calls `getTransferToken(resource)` or `getTransferToken(audience)` and shows the token, "No token" or the error.
+
+The client configuration and the site and client id the transfer token buttons use come from `.env.properties` in the project root, and fall back to dummy values without it. To run the app against a real environment, copy `.env.properties.sample` to `.env.properties` and fill in your values. The file is git-ignored, so it never gets committed. The redirect scheme is taken from `EXAMPLE_LOGIN_REDIRECT_URL`.
 
 ## License
+
 MIT License
 
 Copyright (c) 2025 Bonnier News AB

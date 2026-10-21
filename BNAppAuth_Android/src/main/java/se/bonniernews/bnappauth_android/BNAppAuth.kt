@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resumeWithException
 import net.openid.appauth.*
 import java.net.HttpURLConnection
 import net.openid.appauth.AuthorizationRequest.Prompt.CONSENT
@@ -54,6 +55,21 @@ interface BNAppAuth {
         callback: (idToken: String?, exception: BnAppAuthException?) -> Unit
     )
 
+    /**
+     * Exchanges the user's access token for a short-lived transfer token for the id-service client [audience],
+     * used to log the user in in a web view. Returns null when no token can be issued right now: the user is
+     * logged out, id-service has no such client, or id-service is too slow. Throws [BnAppAuthException] when
+     * the exchange fails.
+     */
+    suspend fun getTransferToken(audience: String): String?
+
+    /**
+     * Exchanges the user's access token for a short-lived transfer token for the site at [resource], to be added
+     * to the url as [BNAppAuthImpl.TRANSFER_TOKEN_PARAMETER] when it opens in a browser. Only https urls get a
+     * token. Returns null and throws like the audience variant.
+     */
+    suspend fun getTransferToken(resource: Uri): String?
+
     fun clearState()
     fun releaseResources()
 
@@ -90,6 +106,7 @@ class BNAppAuthImpl : BNAppAuth {
         const val MIGRATION_PREFS_KEY = "bn_migration_completed"
         const val LIFECYCLE_ABORT_CODE = -999
         const val GENERIC_ERROR = 1008
+        const val TRANSFER_TOKEN_PARAMETER = "idtransfertoken"
     }
 
     @VisibleForTesting
@@ -114,6 +131,13 @@ class BNAppAuthImpl : BNAppAuth {
 
     private var isMigrationDone = false
     private val authMutex = Mutex()
+
+    private val transferTokenExchange = TransferTokenExchange(
+        client = { if (::config.isInitialized) config else null },
+        freshAccessToken = { freshAccessToken() },
+        serviceConfiguration = { fetchServiceConfiguration() },
+        performTokenRequest = { request -> performTransferTokenRequest(request) }
+    )
 
     @VisibleForTesting
     val scope = CoroutineScope(Dispatchers.Main + kotlinx.coroutines.SupervisorJob())
@@ -420,6 +444,62 @@ class BNAppAuthImpl : BNAppAuth {
                 }
 
                 callback(idToken, null)
+            }
+        }
+    }
+
+    override suspend fun getTransferToken(audience: String) =
+        logTransferTokenFailure { transferTokenExchange.transferToken(audience) }
+
+    override suspend fun getTransferToken(resource: Uri) =
+        logTransferTokenFailure { transferTokenExchange.transferToken(resource) }
+
+    private suspend fun logTransferTokenFailure(transferToken: suspend () -> String?): String? = try {
+        transferToken()
+    } catch (e: BnAppAuthException) {
+        Logger.error("getTransferToken=$e", config.debuggable)
+        throw e
+    }
+
+    private suspend fun freshAccessToken(): String? = authMutex.withLock {
+        val service = authService ?: return@withLock null
+        val state = authState
+        if (state == null || !isAuthorized) return@withLock null
+
+        suspendCancellableCoroutine { continuation ->
+            state.performActionWithFreshTokens(service, emptyMap()) { accessToken, _, ex ->
+                if (ex != null) {
+                    continuation.resumeWithException(BnAppAuthException.convert(ex))
+                } else {
+                    writeAuthState(state)
+                    continuation.resume(accessToken)
+                }
+            }
+        }
+    }
+
+    private suspend fun fetchServiceConfiguration(): AuthorizationServiceConfiguration =
+        authState?.authorizationServiceConfiguration ?: suspendCancellableCoroutine { continuation ->
+            authServiceSdk.fetchFromIssuer(config) { serviceConfiguration, ex ->
+                if (serviceConfiguration != null) {
+                    continuation.resume(serviceConfiguration)
+                } else {
+                    continuation.resumeWithException(ex?.let { BnAppAuthException.convert(it) } ?: getGenericException(GENERIC_ERROR))
+                }
+            }
+        }
+
+    // Performed straight on the AuthorizationService, since the response must never replace the user's own tokens.
+    private suspend fun performTransferTokenRequest(request: TokenRequest): String? {
+        val service = authService ?: throw getGenericException()
+        return suspendCancellableCoroutine { continuation ->
+            val clientAuthentication = config.clientSecret?.let { ClientSecretBasic(it) } ?: NoClientAuthentication.INSTANCE
+            service.performTokenRequest(request, clientAuthentication) { response, ex ->
+                if (ex != null) {
+                    continuation.resumeWithException(BnAppAuthException.convert(ex))
+                } else {
+                    continuation.resume(response?.accessToken)
+                }
             }
         }
     }

@@ -6,16 +6,13 @@ import se.bonniernews.bnappauth_android.BNAppAuth
 
 class AuthApplication: Application() {
 
-    private val authScheme = "custom.redirect.scheme"
-    private val loginRedirectURL = "$authScheme://www.test.se/login"
-    private val logoutRedirectUrl = "$authScheme://www.test.se/logout"
-
+    // The values come from .env.properties, see app/build.gradle.kts.
     val config = BNAppAuth.ClientConfiguration(
-        issuer = "https://oidc-provider.com/".toUri(),
-        clientId = "client-id",
+        issuer = BuildConfig.EXAMPLE_ISSUER.toUri(),
+        clientId = BuildConfig.EXAMPLE_CLIENT_ID,
         clientSecret = null,
-        loginRedirectURL = loginRedirectURL.toUri(),
-        logoutRedirectUrl = logoutRedirectUrl.toUri(),
+        loginRedirectURL = BuildConfig.EXAMPLE_LOGIN_REDIRECT_URL.toUri(),
+        logoutRedirectUrl = BuildConfig.EXAMPLE_LOGOUT_REDIRECT_URL.toUri(),
         customScopes = listOf(
             "profile",
             "offline_access",
@@ -26,6 +23,9 @@ class AuthApplication: Application() {
         ),
         debuggable = true
     )
+
+    val transferTokenResource = BuildConfig.EXAMPLE_TRANSFER_TOKEN_RESOURCE.toUri()
+    val transferTokenAudience = BuildConfig.EXAMPLE_TRANSFER_TOKEN_AUDIENCE
 
     override fun onCreate() {
         super.onCreate()
