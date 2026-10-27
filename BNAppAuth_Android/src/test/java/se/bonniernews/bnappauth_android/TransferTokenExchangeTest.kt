@@ -155,9 +155,10 @@ class TransferTokenExchangeTest {
 
     @Test
     fun `transferToken returns null when id-service is too slow`() = runTest {
-        response = {
+        val respond = response
+        response = { request ->
             delay(TransferTokenExchange.TIMEOUT_MS * 2)
-            null
+            respond(request)
         }
 
         assertNull(makeExchange().transferToken(siteUrl))
