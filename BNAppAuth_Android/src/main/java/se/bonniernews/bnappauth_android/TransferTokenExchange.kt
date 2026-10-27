@@ -2,8 +2,9 @@ package se.bonniernews.bnappauth_android
 
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withTimeout
 import net.openid.appauth.AuthorizationServiceConfiguration
 import net.openid.appauth.TokenRequest
 import net.openid.appauth.TokenResponse
@@ -40,23 +41,33 @@ internal class TransferTokenExchange(
     private suspend fun requestTransferToken(origin: String, resource: String): String? =
         withContext(Dispatchers.Main) {
             val client = client() ?: return@withContext null
-            if ((originsWithoutLogin[origin] ?: 0) > now()) return@withContext null
+            if ((originsWithoutLogin[origin] ?: 0) > now()) {
+                Logger.debug("No transfer token: $origin has no id-service client", client.debuggable)
+                return@withContext null
+            }
 
             try {
-                withTimeoutOrNull(timeoutMs) { exchange(client.clientId, resource) }
+                withTimeout(timeoutMs) { exchange(client, resource) }
+            } catch (e: TimeoutCancellationException) {
+                Logger.debug("No transfer token: id-service didn't answer within $timeoutMs ms", client.debuggable)
+                null
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 val exception = e as? BnAppAuthException ?: BnAppAuthException(0, e.message, null, null, e)
                 if (exception.error != INVALID_TARGET) throw exception
+                Logger.debug("No transfer token: id-service has no client for $origin", client.debuggable)
                 originsWithoutLogin[origin] = now() + ORIGIN_WITHOUT_LOGIN_TTL_MS
                 null
             }
         }
 
-    private suspend fun exchange(clientId: String, resource: String): String? {
-        val accessToken = freshAccessToken() ?: return null
-        val request = TokenRequest.Builder(serviceConfiguration(), clientId)
+    private suspend fun exchange(client: BNAppAuth.ClientConfiguration, resource: String): String? {
+        val accessToken = freshAccessToken() ?: run {
+            Logger.debug("No transfer token: the user is logged out", client.debuggable)
+            return null
+        }
+        val request = TokenRequest.Builder(serviceConfiguration(), client.clientId)
             .setGrantType(TOKEN_EXCHANGE_GRANT_TYPE)
             .setScope(SCOPE)
             .setAdditionalParameters(
@@ -69,7 +80,11 @@ internal class TransferTokenExchange(
             )
             .build()
         val response = performTokenRequest(request) ?: return null
-        if (response.additionalParameters["issued_token_type"] != SESSION_TRANSFER_TOKEN_TYPE) return null
+        val issuedTokenType = response.additionalParameters["issued_token_type"]
+        if (issuedTokenType != SESSION_TRANSFER_TOKEN_TYPE) {
+            Logger.debug("No transfer token: id-service issued $issuedTokenType", client.debuggable)
+            return null
+        }
         return response.accessToken
     }
 }
