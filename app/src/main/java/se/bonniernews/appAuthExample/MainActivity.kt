@@ -160,24 +160,13 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                             AuthButton(
-                                "Transfer Token (resource)",
+                                "Transfer Token",
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(32.dp, 16.dp, 32.dp, 0.dp),
                                 onClick = {
-                                    showTransferToken("transferToken (resource)") {
+                                    showTransferToken("transferToken") {
                                         appAuth.getTransferToken(authApplication.transferTokenResource)
-                                    }
-                                }
-                            )
-                            AuthButton(
-                                "Transfer Token (audience)",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(32.dp, 16.dp, 32.dp, 0.dp),
-                                onClick = {
-                                    showTransferToken("transferToken (audience)") {
-                                        appAuth.getTransferToken(authApplication.transferTokenAudience)
                                     }
                                 }
                             )

@@ -46,11 +46,6 @@ android {
             "EXAMPLE_TRANSFER_TOKEN_RESOURCE",
             "\"${envValue("EXAMPLE_TRANSFER_TOKEN_RESOURCE", "https://www.example.com/")}\""
         )
-        buildConfigField(
-            "String",
-            "EXAMPLE_TRANSFER_TOKEN_AUDIENCE",
-            "\"${envValue("EXAMPLE_TRANSFER_TOKEN_AUDIENCE", "site-client-id")}\""
-        )
     }
 
     buildTypes {

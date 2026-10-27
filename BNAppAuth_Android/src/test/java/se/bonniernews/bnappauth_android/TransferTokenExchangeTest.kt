@@ -7,6 +7,7 @@ import kotlinx.coroutines.test.runTest
 import net.openid.appauth.AuthorizationException
 import net.openid.appauth.AuthorizationServiceConfiguration
 import net.openid.appauth.TokenRequest
+import net.openid.appauth.TokenResponse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Rule
@@ -37,7 +38,13 @@ class TransferTokenExchangeTest {
 
     private val requests = mutableListOf<TokenRequest>()
     private var accessToken: String? = "accessToken"
-    private var response: suspend () -> String? = { "transferToken" }
+    private var issuedTokenType = TransferTokenExchange.SESSION_TRANSFER_TOKEN_TYPE
+    private var response: suspend (TokenRequest) -> TokenResponse? = { request ->
+        TokenResponse.Builder(request)
+            .setAccessToken("transferToken")
+            .setAdditionalParameters(mapOf("issued_token_type" to issuedTokenType))
+            .build()
+    }
     private var time = 0L
 
     private fun makeExchange(configuredClient: BNAppAuth.ClientConfiguration? = client) = TransferTokenExchange(
@@ -46,7 +53,7 @@ class TransferTokenExchangeTest {
         serviceConfiguration = { serviceConfiguration },
         performTokenRequest = { request ->
             requests.add(request)
-            response()
+            response(request)
         },
         now = { time }
     )
@@ -56,7 +63,7 @@ class TransferTokenExchangeTest {
     )
 
     @Test
-    fun `transferToken for a resource asks for a token for the url`() = runTest {
+    fun `transferToken asks for a session transfer token for the url`() = runTest {
         val token = makeExchange().transferToken(siteUrl)
 
         assertEquals("transferToken", token)
@@ -69,6 +76,7 @@ class TransferTokenExchangeTest {
             mapOf(
                 "subject_token" to "accessToken",
                 "subject_token_type" to TransferTokenExchange.ACCESS_TOKEN_TYPE,
+                "requested_token_type" to TransferTokenExchange.SESSION_TRANSFER_TOKEN_TYPE,
                 "resource" to siteUrl.toString()
             ),
             request.additionalParameters
@@ -76,18 +84,10 @@ class TransferTokenExchangeTest {
     }
 
     @Test
-    fun `transferToken for an audience asks for a token for the client`() = runTest {
-        val token = makeExchange().transferToken("site-web")
+    fun `transferToken returns null when id-service issues another kind of token`() = runTest {
+        issuedTokenType = "urn:bonniernews:oauth:token-type:login_token"
 
-        assertEquals("transferToken", token)
-        assertEquals(
-            mapOf(
-                "subject_token" to "accessToken",
-                "subject_token_type" to TransferTokenExchange.ACCESS_TOKEN_TYPE,
-                "audience" to "site-web"
-            ),
-            requests.single().additionalParameters
-        )
+        assertNull(makeExchange().transferToken(siteUrl))
     }
 
     @Test
@@ -118,34 +118,24 @@ class TransferTokenExchangeTest {
     }
 
     @Test
-    fun `transferToken remembers sites without id-service login`() = runTest {
+    fun `transferToken remembers origins without id-service login`() = runTest {
         response = { throw tokenError(TransferTokenExchange.INVALID_TARGET) }
         val exchange = makeExchange()
 
         exchange.transferToken(siteUrl)
-        exchange.transferToken(Uri.parse("https://www.site.se/other/"))
+        exchange.transferToken(Uri.parse("https://WWW.SITE.SE:443/other/"))
+        exchange.transferToken(Uri.parse("https://www.site.se:8443/other/"))
 
-        assertEquals(1, requests.size)
+        assertEquals(2, requests.size)
     }
 
     @Test
-    fun `transferToken remembers audiences without a client`() = runTest {
-        response = { throw tokenError(TransferTokenExchange.INVALID_TARGET) }
-        val exchange = makeExchange()
-
-        exchange.transferToken("unknown-client")
-        exchange.transferToken("unknown-client")
-
-        assertEquals(1, requests.size)
-    }
-
-    @Test
-    fun `transferToken asks again once a site without login has expired`() = runTest {
+    fun `transferToken asks again once an origin without login has expired`() = runTest {
         response = { throw tokenError(TransferTokenExchange.INVALID_TARGET) }
         val exchange = makeExchange()
 
         exchange.transferToken(siteUrl)
-        time = TransferTokenExchange.TARGET_WITHOUT_LOGIN_TTL_MS + 1
+        time = TransferTokenExchange.ORIGIN_WITHOUT_LOGIN_TTL_MS + 1
         exchange.transferToken(siteUrl)
 
         assertEquals(2, requests.size)
@@ -167,7 +157,7 @@ class TransferTokenExchangeTest {
     fun `transferToken returns null when id-service is too slow`() = runTest {
         response = {
             delay(TransferTokenExchange.TIMEOUT_MS * 2)
-            "transferToken"
+            null
         }
 
         assertNull(makeExchange().transferToken(siteUrl))

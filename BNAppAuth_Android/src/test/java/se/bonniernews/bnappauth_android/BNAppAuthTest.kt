@@ -1136,7 +1136,10 @@ class BNAppAuthTest {
         whenever(authService.performTokenRequest(any(), any<ClientAuthentication>(), any())).thenAnswer { args ->
             val request = args.getArgument<TokenRequest>(0)
             requests.add(request)
-            val response = TokenResponse.Builder(request).setAccessToken("transferToken").build()
+            val response = TokenResponse.Builder(request)
+                .setAccessToken("transferToken")
+                .setAdditionalParameters(mapOf("issued_token_type" to TransferTokenExchange.SESSION_TRANSFER_TOKEN_TYPE))
+                .build()
             args.getArgument<AuthorizationService.TokenResponseCallback>(2).onTokenRequestCompleted(response, null)
         }
         return requests
@@ -1164,7 +1167,7 @@ class BNAppAuthTest {
         logIn()
         respondToTransferTokenRequest()
 
-        bnAppAuth.getTransferToken("site-web")
+        bnAppAuth.getTransferToken(siteUrl)
 
         verify(authState, never()).update(any<TokenResponse>(), anyOrNull())
         verify(authService, never()).performTokenRequest(any(), any<AuthorizationService.TokenResponseCallback>())

@@ -25,7 +25,6 @@ class AuthApplication: Application() {
     )
 
     val transferTokenResource = BuildConfig.EXAMPLE_TRANSFER_TOKEN_RESOURCE.toUri()
-    val transferTokenAudience = BuildConfig.EXAMPLE_TRANSFER_TOKEN_AUDIENCE
 
     override fun onCreate() {
         super.onCreate()

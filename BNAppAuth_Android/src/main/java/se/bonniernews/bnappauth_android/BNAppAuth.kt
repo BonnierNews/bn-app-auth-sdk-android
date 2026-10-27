@@ -56,17 +56,10 @@ interface BNAppAuth {
     )
 
     /**
-     * Exchanges the user's access token for a short-lived transfer token for the id-service client [audience],
-     * used to log the user in in a web view. Returns null when no token can be issued right now: the user is
-     * logged out, id-service has no such client, or id-service is too slow. Throws [BnAppAuthException] when
-     * the exchange fails.
-     */
-    suspend fun getTransferToken(audience: String): String?
-
-    /**
-     * Exchanges the user's access token for a short-lived transfer token for the site at [resource], to be added
-     * to the url as [BNAppAuthImpl.TRANSFER_TOKEN_PARAMETER] when it opens in a browser. Only https urls get a
-     * token. Returns null and throws like the audience variant.
+     * Exchanges the user's access token for a short-lived session transfer token that logs the user in on the
+     * site at [resource], the https url the app is about to open. Returns null when no token can be issued right
+     * now: the user is logged out, id-service has no client for the site, or id-service is too slow. Throws
+     * [BnAppAuthException] when the exchange fails.
      */
     suspend fun getTransferToken(resource: Uri): String?
 
@@ -448,9 +441,6 @@ class BNAppAuthImpl : BNAppAuth {
         }
     }
 
-    override suspend fun getTransferToken(audience: String) =
-        logTransferTokenFailure { transferTokenExchange.transferToken(audience) }
-
     override suspend fun getTransferToken(resource: Uri) =
         logTransferTokenFailure { transferTokenExchange.transferToken(resource) }
 
@@ -489,8 +479,7 @@ class BNAppAuthImpl : BNAppAuth {
             }
         }
 
-    // Performed straight on the AuthorizationService, since the response must never replace the user's own tokens.
-    private suspend fun performTransferTokenRequest(request: TokenRequest): String? {
+    private suspend fun performTransferTokenRequest(request: TokenRequest): TokenResponse? {
         val service = authService ?: throw getGenericException()
         return suspendCancellableCoroutine { continuation ->
             val clientAuthentication = config.clientSecret?.let { ClientSecretBasic(it) } ?: NoClientAuthentication.INSTANCE
@@ -498,7 +487,7 @@ class BNAppAuthImpl : BNAppAuth {
                 if (ex != null) {
                     continuation.resumeWithException(BnAppAuthException.convert(ex))
                 } else {
-                    continuation.resume(response?.accessToken)
+                    continuation.resume(response)
                 }
             }
         }
