@@ -946,6 +946,7 @@ class BNAppAuthTest {
         val appAuth = spy(bnAppAuth)
         mockProperty(appAuth, "scope", this)
         appAuth.authState = authState
+        appAuth.currentIdToken = "cached_id_token"
 
         mockProperty(appAuth, "isMigrationDone", true)
 
@@ -1171,6 +1172,61 @@ class BNAppAuthTest {
 
         verify(authState, never()).update(any<TokenResponse>(), anyOrNull())
         verify(authService, never()).performTokenRequest(any(), any<AuthorizationService.TokenResponseCallback>())
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `getTransferToken keeps a state cleared during the refresh cleared`() = runTest {
+        logIn()
+        respondToTransferTokenRequest()
+        whenever(authState.performActionWithFreshTokens(any(), any<Map<String, String>>(), any())).thenAnswer { args ->
+            bnAppAuth.clearState()
+            (args.arguments[2] as AuthStateAction).execute("accessToken", "idToken", null)
+        }
+
+        assertNull(bnAppAuth.getTransferToken(siteUrl))
+        assertNull(bnAppAuth.authState)
+        verify(authState, never()).jsonSerializeString()
+        verify(authService, never()).performTokenRequest(any(), any<ClientAuthentication>(), any())
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `getTransferToken rejects a response that arrives after releaseResources`() = runTest {
+        logIn()
+        whenever(authService.performTokenRequest(any(), any<ClientAuthentication>(), any())).thenAnswer { args ->
+            val request = args.getArgument<TokenRequest>(0)
+            val response = TokenResponse.Builder(request)
+                .setAccessToken("transferToken")
+                .setAdditionalParameters(mapOf("issued_token_type" to TransferTokenExchange.SESSION_TRANSFER_TOKEN_TYPE))
+                .build()
+            bnAppAuth.releaseResources()
+            args.getArgument<AuthorizationService.TokenResponseCallback>(2).onTokenRequestCompleted(response, null)
+        }
+
+        val exception = runCatching { bnAppAuth.getTransferToken(siteUrl) }.exceptionOrNull()
+
+        assertEquals(BNAppAuthImpl.LIFECYCLE_ABORT_CODE, (exception as? BnAppAuthException)?.code)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `getIdToken reports the id token refreshed by getTransferToken as updated`() = runTest {
+        logIn()
+        respondToTransferTokenRequest()
+        mockProperty(bnAppAuth, "isMigrationDone", true)
+        mockProperty(bnAppAuth, "scope", this)
+        bnAppAuth.currentIdToken = "idToken"
+        whenever(authState.idToken).thenReturn("refreshedIdToken")
+        whenever(authState.needsTokenRefresh).thenReturn(false)
+
+        bnAppAuth.getTransferToken(siteUrl)
+        var result: BNAppAuth.TokenResponse? = null
+        bnAppAuth.getIdToken(forceRefresh = false) { response, _ -> result = response }
+        advanceUntilIdle()
+
+        assertEquals("refreshedIdToken", result?.idToken)
+        assertEquals(true, result?.isUpdated)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)

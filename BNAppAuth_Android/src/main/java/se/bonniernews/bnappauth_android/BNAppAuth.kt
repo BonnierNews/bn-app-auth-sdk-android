@@ -283,12 +283,15 @@ class BNAppAuthImpl : BNAppAuth {
 
                 if (!(getLoginToken || forceRefresh) && isAuthorized && authState?.needsTokenRefresh == false) {
                     val params = getAdditionalParameters(authState?.lastTokenResponse)
+                    val token = authState?.idToken
+                    val isUpdated = token != currentIdToken
+                    currentIdToken = token
                     callback(
                         BNAppAuth.TokenResponse(
-                            authState?.idToken,
+                            token,
                             params?.get("old_bnidtoken"),
                             null,
-                            false
+                            isUpdated
                         ), null
                     )
                     return@withLock
@@ -458,11 +461,14 @@ class BNAppAuthImpl : BNAppAuth {
 
         suspendCancellableCoroutine { continuation ->
             state.performActionWithFreshTokens(service, emptyMap()) { accessToken, _, ex ->
-                if (ex != null) {
-                    continuation.resumeWithException(BnAppAuthException.convert(ex))
-                } else {
-                    writeAuthState(state)
-                    continuation.resume(accessToken)
+                when {
+                    authService !== service -> continuation.resumeWithException(getGenericException())
+                    authState !== state -> continuation.resume(null)
+                    ex != null -> continuation.resumeWithException(BnAppAuthException.convert(ex))
+                    else -> {
+                        storeAuthState(state)
+                        continuation.resume(accessToken)
+                    }
                 }
             }
         }
@@ -484,10 +490,10 @@ class BNAppAuthImpl : BNAppAuth {
         return suspendCancellableCoroutine { continuation ->
             val clientAuthentication = config.clientSecret?.let { ClientSecretBasic(it) } ?: NoClientAuthentication.INSTANCE
             service.performTokenRequest(request, clientAuthentication) { response, ex ->
-                if (ex != null) {
-                    continuation.resumeWithException(BnAppAuthException.convert(ex))
-                } else {
-                    continuation.resume(response)
+                when {
+                    authService !== service -> continuation.resumeWithException(getGenericException())
+                    ex != null -> continuation.resumeWithException(BnAppAuthException.convert(ex))
+                    else -> continuation.resume(response)
                 }
             }
         }
@@ -600,12 +606,16 @@ class BNAppAuthImpl : BNAppAuth {
     @VisibleForTesting
     fun writeAuthState(state: AuthState?) {
         val nonNullState = state ?: return
-        this.authState = nonNullState
         currentIdToken = nonNullState.idToken
+        storeAuthState(nonNullState)
+    }
+
+    private fun storeAuthState(state: AuthState) {
+        this.authState = state
         authPrefs?.edit(commit = true) {
             putString(
                 SHARED_PREFS_KEY,
-                nonNullState.jsonSerializeString()
+                state.jsonSerializeString()
             )
         }
     }
