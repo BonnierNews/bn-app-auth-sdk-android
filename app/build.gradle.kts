@@ -33,18 +33,18 @@ android {
         }
 
         manifestPlaceholders["appAuthRedirectScheme"] = loginRedirectUrl.substringBefore("://")
-        buildConfigField("String", "EXAMPLE_ISSUER", "\"${envValue("EXAMPLE_ISSUER", "https://oidc-provider.com/")}\"")
-        buildConfigField("String", "EXAMPLE_CLIENT_ID", "\"${envValue("EXAMPLE_CLIENT_ID", "client-id")}\"")
-        buildConfigField("String", "EXAMPLE_LOGIN_REDIRECT_URL", "\"$loginRedirectUrl\"")
-        buildConfigField(
-            "String",
-            "EXAMPLE_LOGOUT_REDIRECT_URL",
-            "\"${envValue("EXAMPLE_LOGOUT_REDIRECT_URL", "custom.redirect.scheme://www.test.se/logout")}\""
+        resValue("string", "example_issuer", envValue("EXAMPLE_ISSUER", "https://oidc-provider.com/"))
+        resValue("string", "example_client_id", envValue("EXAMPLE_CLIENT_ID", "client-id"))
+        resValue("string", "example_login_redirect_url", loginRedirectUrl)
+        resValue(
+            "string",
+            "example_logout_redirect_url",
+            envValue("EXAMPLE_LOGOUT_REDIRECT_URL", "custom.redirect.scheme://www.test.se/logout")
         )
-        buildConfigField(
-            "String",
-            "EXAMPLE_TRANSFER_TOKEN_RESOURCE",
-            "\"${envValue("EXAMPLE_TRANSFER_TOKEN_RESOURCE", "https://www.example.com/")}\""
+        resValue(
+            "string",
+            "example_transfer_token_resource",
+            envValue("EXAMPLE_TRANSFER_TOKEN_RESOURCE", "https://www.example.com/")
         )
     }
 
@@ -67,7 +67,6 @@ android {
     }
     buildFeatures {
         compose = true
-        buildConfig = true
     }
     packaging {
         resources {
