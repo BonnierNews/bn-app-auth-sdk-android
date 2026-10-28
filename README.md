@@ -96,6 +96,26 @@ BNAppAuth.instance.login { intent, exception ->
 }
 ```
 
+### Trying it in the example app
+
+The [example app](#example-app) reads its client configuration from a local, git-ignored `.env.properties` in the project root. Without it, the app builds with dummy values that can't log in.
+
+1. Copy the sample:
+   ```bash
+   cp .env.properties.sample .env.properties
+   ```
+2. Fill in the values for the environment you want to test against:
+
+   | Key | Description |
+   |---|---|
+   | `EXAMPLE_ISSUER` | The id-service issuer URL. |
+   | `EXAMPLE_CLIENT_ID` | The app client's id in that environment. |
+   | `EXAMPLE_LOGIN_REDIRECT_URL` | The client's login redirect URL. Its scheme is also registered as the app's redirect scheme. |
+   | `EXAMPLE_LOGOUT_REDIRECT_URL` | The client's logout redirect URL. |
+   | `EXAMPLE_TRANSFER_TOKEN_RESOURCE` | The site the **Transfer Token** button asks for a token for. It must have a site client in that environment, or the answer is "No token". |
+
+3. Build and run the `app` module. The values are read at build time, so rebuild after changing them.
+
 ## Configuration
 
 `BNAppAuth.ClientConfiguration` takes the following arguments:
@@ -211,7 +231,7 @@ The `app` module is a Compose app for trying the SDK by hand:
 4. **Get Login Token**: calls `getIdToken(getLoginToken = true)`.
 5. **Transfer Token**: calls `getTransferToken(resource)` for the test site and shows the token, "No token" or the error.
 
-The client configuration and the site the transfer token button uses come from `.env.properties` in the project root, and fall back to dummy values without it. To run the app against a real environment, copy `.env.properties.sample` to `.env.properties` and fill in your values. The file is git-ignored, so it never gets committed. The redirect scheme is taken from `EXAMPLE_LOGIN_REDIRECT_URL`.
+To run it against a real environment, set up `.env.properties` as described in [Trying it in the example app](#trying-it-in-the-example-app).
 
 ## License
 
