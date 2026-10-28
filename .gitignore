@@ -8,3 +8,4 @@ captures
 *.iml
 github.properties
 app/local.properties
+.env.properties

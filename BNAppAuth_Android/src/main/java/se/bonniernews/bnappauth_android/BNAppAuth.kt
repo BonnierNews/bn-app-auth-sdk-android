@@ -10,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resumeWithException
 import net.openid.appauth.*
 import java.net.HttpURLConnection
 import net.openid.appauth.AuthorizationRequest.Prompt.CONSENT
@@ -54,6 +55,14 @@ interface BNAppAuth {
         callback: (idToken: String?, exception: BnAppAuthException?) -> Unit
     )
 
+    /**
+     * Exchanges the user's access token for a short-lived session transfer token that logs the user in on the
+     * site at [resource], the https url the app is about to open. Returns null when no token can be issued right
+     * now: the user is logged out, id-service has no client for the site, or id-service is too slow. Throws
+     * [BnAppAuthException] when the exchange fails.
+     */
+    suspend fun getTransferToken(resource: Uri): String?
+
     fun clearState()
     fun releaseResources()
 
@@ -90,6 +99,7 @@ class BNAppAuthImpl : BNAppAuth {
         const val MIGRATION_PREFS_KEY = "bn_migration_completed"
         const val LIFECYCLE_ABORT_CODE = -999
         const val GENERIC_ERROR = 1008
+        const val TRANSFER_TOKEN_PARAMETER = "idtransfertoken"
     }
 
     @VisibleForTesting
@@ -114,6 +124,13 @@ class BNAppAuthImpl : BNAppAuth {
 
     private var isMigrationDone = false
     private val authMutex = Mutex()
+
+    private val transferTokenExchange = TransferTokenExchange(
+        client = { if (::config.isInitialized) config else null },
+        freshAccessToken = { freshAccessToken() },
+        serviceConfiguration = { fetchServiceConfiguration() },
+        performTokenRequest = { request -> performTransferTokenRequest(request) }
+    )
 
     @VisibleForTesting
     val scope = CoroutineScope(Dispatchers.Main + kotlinx.coroutines.SupervisorJob())
@@ -266,12 +283,15 @@ class BNAppAuthImpl : BNAppAuth {
 
                 if (!(getLoginToken || forceRefresh) && isAuthorized && authState?.needsTokenRefresh == false) {
                     val params = getAdditionalParameters(authState?.lastTokenResponse)
+                    val token = authState?.idToken
+                    val isUpdated = token != currentIdToken
+                    currentIdToken = token
                     callback(
                         BNAppAuth.TokenResponse(
-                            authState?.idToken,
+                            token,
                             params?.get("old_bnidtoken"),
                             null,
-                            false
+                            isUpdated
                         ), null
                     )
                     return@withLock
@@ -424,6 +444,61 @@ class BNAppAuthImpl : BNAppAuth {
         }
     }
 
+    override suspend fun getTransferToken(resource: Uri) =
+        logTransferTokenFailure { transferTokenExchange.transferToken(resource) }
+
+    private suspend fun logTransferTokenFailure(transferToken: suspend () -> String?): String? = try {
+        transferToken()
+    } catch (e: BnAppAuthException) {
+        Logger.error("getTransferToken=$e", config.debuggable)
+        throw e
+    }
+
+    private suspend fun freshAccessToken(): String? = authMutex.withLock {
+        val service = authService ?: return@withLock null
+        val state = authState
+        if (state == null || !isAuthorized) return@withLock null
+
+        suspendCancellableCoroutine { continuation ->
+            state.performActionWithFreshTokens(service, emptyMap()) { accessToken, _, ex ->
+                when {
+                    authService !== service -> continuation.resumeWithException(getGenericException())
+                    authState !== state -> continuation.resume(null)
+                    ex != null -> continuation.resumeWithException(BnAppAuthException.convert(ex))
+                    else -> {
+                        storeAuthState(state)
+                        continuation.resume(accessToken)
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun fetchServiceConfiguration(): AuthorizationServiceConfiguration =
+        authState?.authorizationServiceConfiguration ?: suspendCancellableCoroutine { continuation ->
+            authServiceSdk.fetchFromIssuer(config) { serviceConfiguration, ex ->
+                if (serviceConfiguration != null) {
+                    continuation.resume(serviceConfiguration)
+                } else {
+                    continuation.resumeWithException(ex?.let { BnAppAuthException.convert(it) } ?: getGenericException(GENERIC_ERROR))
+                }
+            }
+        }
+
+    private suspend fun performTransferTokenRequest(request: TokenRequest): TokenResponse? {
+        val service = authService ?: throw getGenericException()
+        return suspendCancellableCoroutine { continuation ->
+            val clientAuthentication = config.clientSecret?.let { ClientSecretBasic(it) } ?: NoClientAuthentication.INSTANCE
+            service.performTokenRequest(request, clientAuthentication) { response, ex ->
+                when {
+                    authService !== service -> continuation.resumeWithException(getGenericException())
+                    ex != null -> continuation.resumeWithException(BnAppAuthException.convert(ex))
+                    else -> continuation.resume(response)
+                }
+            }
+        }
+    }
+
     @VisibleForTesting
     internal fun getAdditionalParameters(resp: TokenResponse?) = resp?.additionalParameters
 
@@ -531,12 +606,16 @@ class BNAppAuthImpl : BNAppAuth {
     @VisibleForTesting
     fun writeAuthState(state: AuthState?) {
         val nonNullState = state ?: return
-        this.authState = nonNullState
         currentIdToken = nonNullState.idToken
+        storeAuthState(nonNullState)
+    }
+
+    private fun storeAuthState(state: AuthState) {
+        this.authState = state
         authPrefs?.edit(commit = true) {
             putString(
                 SHARED_PREFS_KEY,
-                nonNullState.jsonSerializeString()
+                state.jsonSerializeString()
             )
         }
     }
