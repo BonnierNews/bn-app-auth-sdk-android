@@ -175,10 +175,10 @@ val token = BNAppAuth.instance.getTransferToken(resource = siteUrl)
 
 How the app uses the token depends on where the site opens:
 
-- **In a browser:** add the token to the URL as `BNAppAuthImpl.TRANSFER_TOKEN_PARAMETER` (`idtransfertoken`). The site's connector redeems it, sets the session cookie and redirects to the same URL without the token.
+- **In a browser:** add the token to the URL as `BNAppAuth.TRANSFER_TOKEN_PARAMETER` (`idtransfertoken`). The site's connector redeems it, sets the session cookie and redirects to the same URL without the token.
   ```kotlin
   val url = token
-      ?.let { siteUrl.buildUpon().appendQueryParameter(BNAppAuthImpl.TRANSFER_TOKEN_PARAMETER, it).build() }
+      ?.let { siteUrl.buildUpon().appendQueryParameter(BNAppAuth.TRANSFER_TOKEN_PARAMETER, it).build() }
       ?: siteUrl
   ```
 - **In a web view:** before loading the page, POST the token as the form field `session_transfer_token` to the site's `/id/session`, and put the session cookies from the `204` response into the web view's cookie store. Logging out of the app doesn't end the site's session, so clear the web view's cookies when the user logs out.

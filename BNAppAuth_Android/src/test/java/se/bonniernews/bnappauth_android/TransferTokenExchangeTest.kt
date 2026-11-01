@@ -130,12 +130,12 @@ class TransferTokenExchangeTest {
     }
 
     @Test
-    fun `transferToken asks again once an origin without login has expired`() = runTest {
+    fun `transferToken asks again once an origin without client has expired`() = runTest {
         response = { throw tokenError(TransferTokenExchange.INVALID_TARGET) }
         val exchange = makeExchange()
 
         exchange.transferToken(siteUrl)
-        time = TransferTokenExchange.ORIGIN_WITHOUT_LOGIN_TTL_MS + 1
+        time = TransferTokenExchange.ORIGIN_WITHOUT_CLIENT_TTL_MS + 1
         exchange.transferToken(siteUrl)
 
         assertEquals(2, requests.size)

@@ -68,6 +68,7 @@ interface BNAppAuth {
 
     companion object {
         val instance = BNAppAuthImpl()
+        const val TRANSFER_TOKEN_PARAMETER = "idtransfertoken"
     }
 
     data class ClientConfiguration(
@@ -99,7 +100,6 @@ class BNAppAuthImpl : BNAppAuth {
         const val MIGRATION_PREFS_KEY = "bn_migration_completed"
         const val LIFECYCLE_ABORT_CODE = -999
         const val GENERIC_ERROR = 1008
-        const val TRANSFER_TOKEN_PARAMETER = "idtransfertoken"
     }
 
     @VisibleForTesting
@@ -444,11 +444,8 @@ class BNAppAuthImpl : BNAppAuth {
         }
     }
 
-    override suspend fun getTransferToken(resource: Uri) =
-        logTransferTokenFailure { transferTokenExchange.transferToken(resource) }
-
-    private suspend fun logTransferTokenFailure(transferToken: suspend () -> String?): String? = try {
-        transferToken()
+    override suspend fun getTransferToken(resource: Uri): String? = try {
+        transferTokenExchange.transferToken(resource)
     } catch (e: BnAppAuthException) {
         Logger.error("getTransferToken=$e", config.debuggable)
         throw e

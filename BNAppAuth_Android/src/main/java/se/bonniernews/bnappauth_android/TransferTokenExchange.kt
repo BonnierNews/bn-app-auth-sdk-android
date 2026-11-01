@@ -26,10 +26,10 @@ internal class TransferTokenExchange(
         const val SCOPE = "openid"
         const val INVALID_TARGET = "invalid_target"
         const val TIMEOUT_MS = 2_000L
-        const val ORIGIN_WITHOUT_LOGIN_TTL_MS = 24 * 60 * 60 * 1_000L
+        const val ORIGIN_WITHOUT_CLIENT_TTL_MS = 24 * 60 * 60 * 1_000L
     }
 
-    private val originsWithoutLogin = mutableMapOf<String, Long>()
+    private val originsWithoutClient = mutableMapOf<String, Long>()
 
     suspend fun transferToken(resource: Uri): String? {
         val host = resource.host
@@ -41,7 +41,7 @@ internal class TransferTokenExchange(
     private suspend fun requestTransferToken(origin: String, resource: String): String? =
         withContext(Dispatchers.Main) {
             val client = client() ?: return@withContext null
-            if ((originsWithoutLogin[origin] ?: 0) > now()) {
+            if ((originsWithoutClient[origin] ?: 0) > now()) {
                 Logger.debug("No transfer token: $origin has no id-service client", client.debuggable)
                 return@withContext null
             }
@@ -57,7 +57,7 @@ internal class TransferTokenExchange(
                 val exception = e as? BnAppAuthException ?: BnAppAuthException(0, e.message, null, null, e)
                 if (exception.error != INVALID_TARGET) throw exception
                 Logger.debug("No transfer token: id-service has no client for $origin", client.debuggable)
-                originsWithoutLogin[origin] = now() + ORIGIN_WITHOUT_LOGIN_TTL_MS
+                originsWithoutClient[origin] = now() + ORIGIN_WITHOUT_CLIENT_TTL_MS
                 null
             }
         }
