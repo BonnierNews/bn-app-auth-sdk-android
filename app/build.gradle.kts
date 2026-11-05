@@ -1,8 +1,20 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// The example app's client and test values come from the git-ignored .env.properties
+// (copy .env.properties.sample), and fall back to dummy values without it.
+val envProperties = Properties().apply {
+    rootProject.file(".env.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+}
+
+fun envValue(name: String, dummy: String): String = envProperties.getProperty(name) ?: dummy
+
+val loginRedirectUrl = envValue("EXAMPLE_LOGIN_REDIRECT_URL", "custom.redirect.scheme://www.test.se/login")
 
 android {
     namespace = "se.bonniernews.appAuthExample"
@@ -20,7 +32,20 @@ android {
             useSupportLibrary = true
         }
 
-        manifestPlaceholders["appAuthRedirectScheme"] = "custom.redirect.scheme"
+        manifestPlaceholders["appAuthRedirectScheme"] = loginRedirectUrl.substringBefore("://")
+        resValue("string", "example_issuer", envValue("EXAMPLE_ISSUER", "https://oidc-provider.com/"))
+        resValue("string", "example_client_id", envValue("EXAMPLE_CLIENT_ID", "client-id"))
+        resValue("string", "example_login_redirect_url", loginRedirectUrl)
+        resValue(
+            "string",
+            "example_logout_redirect_url",
+            envValue("EXAMPLE_LOGOUT_REDIRECT_URL", "custom.redirect.scheme://www.test.se/logout")
+        )
+        resValue(
+            "string",
+            "example_transfer_token_resource",
+            envValue("EXAMPLE_TRANSFER_TOKEN_RESOURCE", "https://www.example.com/")
+        )
     }
 
     buildTypes {

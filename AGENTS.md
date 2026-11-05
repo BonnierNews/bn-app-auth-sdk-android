@@ -19,9 +19,10 @@ This is a two-module Gradle project (`settings.gradle.kts`):
 BNAppAuth_Android/           # :BNAppAuth_Android — the published library
   src/main/java/se/bonniernews/bnappauth_android/
     BNAppAuth.kt             # Public `interface BNAppAuth` + `BNAppAuth.instance` (BNAppAuthImpl) + ClientConfiguration
+    TransferTokenExchange.kt # Transfer tokens for other sites, behind BNAppAuth.getTransferToken
     AuthServiceSdk.kt        # Thin wrapper over AppAuth's AuthorizationServiceConfiguration / response parsing
     Logger.kt
-  src/test/                  # Robolectric + Mockito unit tests (BNAppAuthTest.kt)
+  src/test/                  # Robolectric + Mockito unit tests (BNAppAuthTest.kt, TransferTokenExchangeTest.kt)
   src/androidTest/           # Instrumented tests
   build.gradle.kts           # library + maven-publish config
 app/                         # :app — Compose example app (MainActivity, AuthApplication, ui/theme)
