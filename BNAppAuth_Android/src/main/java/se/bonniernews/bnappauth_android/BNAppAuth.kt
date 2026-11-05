@@ -68,7 +68,6 @@ interface BNAppAuth {
 
     companion object {
         val instance = BNAppAuthImpl()
-        const val TRANSFER_TOKEN_PARAMETER = "idtransfertoken"
     }
 
     data class ClientConfiguration(
