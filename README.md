@@ -173,6 +173,12 @@ A session transfer token is a short-lived token that logs the user in on another
 val token = BNAppAuth.instance.getTransferToken(resource = siteUrl)
 ```
 
+`getTransferToken` waits up to `BNAppAuth.DEFAULT_TRANSFER_TOKEN_TIMEOUT` (2 seconds) for id-service. Pass a longer `timeout` where a missing token costs more than the wait, such as when creating a web view session in the background:
+
+```kotlin
+val token = BNAppAuth.instance.getTransferToken(resource = siteUrl, timeout = 5.seconds)
+```
+
 How the app uses the token depends on where the site opens:
 
 - **In a browser:** add the token to the URL as the query parameter `idtransfertoken`. The site's connector redeems it, sets the session cookie and redirects to the same URL without the token.
@@ -189,7 +195,7 @@ The token lives for 180 seconds and works once, so ask for a new one every time 
   - the user is logged out,
   - id-service has no client for the site (it answers `invalid_target`, and the SDK then skips the site's origin for 24 hours),
   - id-service answers with another kind of token than a session transfer token, or
-  - id-service didn't answer within 2 seconds.
+  - id-service didn't answer within the timeout.
 - **A `BnAppAuthException`** means the exchange failed. Open the URL as it is. The next call tries again.
 - **Only https URLs** get a token, since the token can end up in the URL the browser opens.
 

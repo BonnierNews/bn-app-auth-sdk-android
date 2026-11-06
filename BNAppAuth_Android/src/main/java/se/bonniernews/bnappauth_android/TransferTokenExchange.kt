@@ -9,13 +9,13 @@ import net.openid.appauth.AuthorizationServiceConfiguration
 import net.openid.appauth.TokenRequest
 import net.openid.appauth.TokenResponse
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.time.Duration
 
 internal class TransferTokenExchange(
     private val client: () -> BNAppAuth.ClientConfiguration?,
     private val freshAccessToken: suspend () -> String?,
     private val serviceConfiguration: suspend () -> AuthorizationServiceConfiguration,
     private val performTokenRequest: suspend (TokenRequest) -> TokenResponse?,
-    private val timeoutMs: Long = TIMEOUT_MS,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
 
@@ -25,20 +25,19 @@ internal class TransferTokenExchange(
         const val SESSION_TRANSFER_TOKEN_TYPE = "urn:bonniernews:oauth:token-type:session_transfer_token"
         const val SCOPE = "openid"
         const val INVALID_TARGET = "invalid_target"
-        const val TIMEOUT_MS = 2_000L
         const val ORIGIN_WITHOUT_CLIENT_TTL_MS = 24 * 60 * 60 * 1_000L
     }
 
     private val originsWithoutClient = mutableMapOf<String, Long>()
 
-    suspend fun transferToken(resource: Uri): String? {
+    suspend fun transferToken(resource: Uri, timeout: Duration = BNAppAuth.DEFAULT_TRANSFER_TOKEN_TIMEOUT): String? {
         val host = resource.host
         if (resource.scheme != "https" || host.isNullOrEmpty()) return null
         val port = if (resource.port == -1) 443 else resource.port
-        return requestTransferToken("https://${host.lowercase()}:$port", resource.toString())
+        return requestTransferToken("https://${host.lowercase()}:$port", resource.toString(), timeout)
     }
 
-    private suspend fun requestTransferToken(origin: String, resource: String): String? =
+    private suspend fun requestTransferToken(origin: String, resource: String, timeout: Duration): String? =
         withContext(Dispatchers.Main) {
             val client = client() ?: return@withContext null
             if ((originsWithoutClient[origin] ?: 0) > now()) {
@@ -47,9 +46,9 @@ internal class TransferTokenExchange(
             }
 
             try {
-                withTimeout(timeoutMs) { exchange(client, resource) }
+                withTimeout(timeout) { exchange(client, resource) }
             } catch (e: TimeoutCancellationException) {
-                Logger.debug("No transfer token: id-service didn't answer within $timeoutMs ms", client.debuggable)
+                Logger.debug("No transfer token: id-service didn't answer within $timeout", client.debuggable)
                 null
             } catch (e: CancellationException) {
                 throw e
