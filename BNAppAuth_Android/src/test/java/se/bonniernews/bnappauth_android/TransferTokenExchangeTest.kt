@@ -14,6 +14,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -157,10 +158,21 @@ class TransferTokenExchangeTest {
     fun `transferToken returns null when id-service is too slow`() = runTest {
         val respond = response
         response = { request ->
-            delay(TransferTokenExchange.TIMEOUT_MS * 2)
+            delay(BNAppAuth.DEFAULT_TRANSFER_TOKEN_TIMEOUT * 2)
             respond(request)
         }
 
         assertNull(makeExchange().transferToken(siteUrl))
+    }
+
+    @Test
+    fun `transferToken waits for a slow id-service within a longer timeout`() = runTest {
+        val respond = response
+        response = { request ->
+            delay(3.seconds)
+            respond(request)
+        }
+
+        assertEquals("transferToken", makeExchange().transferToken(siteUrl, timeout = 5.seconds))
     }
 }

@@ -24,6 +24,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancelChildren
 import java.net.URL
 import kotlin.toString
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 interface BNAppAuth {
     val isAuthorized: Boolean
@@ -58,16 +60,17 @@ interface BNAppAuth {
     /**
      * Exchanges the user's access token for a short-lived session transfer token that logs the user in on the
      * site at [resource], the https url the app is about to open. Returns null when no token can be issued right
-     * now: the user is logged out, id-service has no client for the site, or id-service is too slow. Throws
-     * [BnAppAuthException] when the exchange fails.
+     * now: the user is logged out, id-service has no client for the site, or id-service didn't answer within
+     * [timeout]. Throws [BnAppAuthException] when the exchange fails.
      */
-    suspend fun getTransferToken(resource: Uri): String?
+    suspend fun getTransferToken(resource: Uri, timeout: Duration = DEFAULT_TRANSFER_TOKEN_TIMEOUT): String?
 
     fun clearState()
     fun releaseResources()
 
     companion object {
         val instance = BNAppAuthImpl()
+        val DEFAULT_TRANSFER_TOKEN_TIMEOUT = 2.seconds
     }
 
     data class ClientConfiguration(
@@ -443,8 +446,8 @@ class BNAppAuthImpl : BNAppAuth {
         }
     }
 
-    override suspend fun getTransferToken(resource: Uri): String? = try {
-        transferTokenExchange.transferToken(resource)
+    override suspend fun getTransferToken(resource: Uri, timeout: Duration): String? = try {
+        transferTokenExchange.transferToken(resource, timeout)
     } catch (e: BnAppAuthException) {
         Logger.error("getTransferToken=$e", config.debuggable)
         throw e
